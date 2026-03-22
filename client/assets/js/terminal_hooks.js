@@ -1,6 +1,5 @@
 export const TerminalInput = {
   mounted() {
-    this.el.focus();
     this.el.addEventListener("keydown", (e) => {
       e.preventDefault();
       const key =
@@ -27,6 +26,17 @@ export const TerminalInput = {
           : null;
 
       if (key) this.pushEvent("send_input", { key });
+    });
+  },
+};
+
+export const SnippetInput = {
+  mounted() {
+    this.el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && e.ctrlKey) {
+        e.preventDefault();
+        this.el.form?.requestSubmit();
+      }
     });
   },
 };

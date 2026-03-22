@@ -21,6 +21,7 @@ defmodule TerminalUi.TerminalClient do
 
   def get_pane(id) do
     panes = Req.get!(@base <> "/panes").body
+
     case Enum.find(panes, &(&1["id"] == id)) do
       nil -> {:error, :not_found}
       pane -> {:ok, pane}

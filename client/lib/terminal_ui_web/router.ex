@@ -18,8 +18,8 @@ defmodule TerminalUiWeb.Router do
   scope "/", TerminalUiWeb do
     pipe_through :browser
 
-    get  "/login",  SessionController, :new
-    post "/login",  SessionController, :create
+    get "/login", SessionController, :new
+    post "/login", SessionController, :create
     delete "/logout", SessionController, :delete
   end
 

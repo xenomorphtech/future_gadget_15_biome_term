@@ -40,6 +40,7 @@ defmodule TerminalUi.PaneSocket do
           "panes",
           {:pane_terminated, state.pane_id}
         )
+
         {:ok, state}
 
       _ ->

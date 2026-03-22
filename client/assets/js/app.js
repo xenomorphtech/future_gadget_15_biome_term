@@ -21,12 +21,12 @@ import "phoenix_html"
 import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 import topbar from "../vendor/topbar"
-import {TerminalInput} from "./terminal_hooks"
+import {SnippetInput, TerminalInput} from "./terminal_hooks"
 
 let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 let liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
-  hooks: {TerminalInput},
+  hooks: {SnippetInput, TerminalInput},
   params: {_csrf_token: csrfToken}
 })
 
@@ -43,4 +43,3 @@ liveSocket.connect()
 // >> liveSocket.enableLatencySim(1000)  // enabled for duration of browser session
 // >> liveSocket.disableLatencySim()
 window.liveSocket = liveSocket
-
