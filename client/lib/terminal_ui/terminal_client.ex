@@ -19,6 +19,14 @@ defmodule TerminalUi.TerminalClient do
     {:ok, Req.get!(@base <> "/panes/#{id}/screen").body}
   end
 
+  def get_pane(id) do
+    panes = Req.get!(@base <> "/panes").body
+    case Enum.find(panes, &(&1["id"] == id)) do
+      nil -> {:error, :not_found}
+      pane -> {:ok, pane}
+    end
+  end
+
   def send_input(id, data) do
     Req.post!(@base <> "/panes/#{id}/input", json: %{data: Base.encode64(data)})
   end

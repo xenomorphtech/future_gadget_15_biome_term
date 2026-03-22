@@ -32,5 +32,18 @@ defmodule TerminalUi.PaneSocket do
 
   def handle_ping(_, state), do: {:reply, {:pong, ""}, state}
 
-  def handle_disconnect(_, state), do: {:reconnect, state}
+  def handle_disconnect(_conn_status, state) do
+    case TerminalUi.TerminalClient.get_pane(state.pane_id) do
+      {:ok, %{"terminated" => true}} ->
+        Phoenix.PubSub.broadcast(
+          TerminalUi.PubSub,
+          "panes",
+          {:pane_terminated, state.pane_id}
+        )
+        {:ok, state}
+
+      _ ->
+        {:reconnect, state}
+    end
+  end
 end

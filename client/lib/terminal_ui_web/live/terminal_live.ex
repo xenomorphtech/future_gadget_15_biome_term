@@ -12,6 +12,7 @@ defmodule TerminalUiWeb.TerminalLive do
 
   @impl true
   def handle_info(:load_panes, socket) do
+    Phoenix.PubSub.subscribe(TerminalUi.PubSub, "panes")
     panes = TerminalClient.list_panes()
     Enum.each(panes, &PaneSupervisor.ensure_started(&1["id"]))
     socket = assign(socket, :panes, panes)
@@ -23,6 +24,14 @@ defmodule TerminalUiWeb.TerminalLive do
       end
 
     {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({:pane_terminated, id}, socket) do
+    panes = Enum.map(socket.assigns.panes, fn pane ->
+      if pane["id"] == id, do: Map.put(pane, "terminated", true), else: pane
+    end)
+    {:noreply, assign(socket, :panes, panes)}
   end
 
   @impl true
