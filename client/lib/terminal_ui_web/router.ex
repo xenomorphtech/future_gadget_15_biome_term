@@ -10,18 +10,23 @@ defmodule TerminalUiWeb.Router do
     plug :put_secure_browser_headers
   end
 
-  pipeline :api do
-    plug :accepts, ["json"]
+  pipeline :require_auth do
+    plug TerminalUiWeb.Plugs.Auth
   end
 
+  # Public: login / logout
   scope "/", TerminalUiWeb do
     pipe_through :browser
 
-    live "/", TerminalLive, :index
+    get  "/login",  SessionController, :new
+    post "/login",  SessionController, :create
+    delete "/logout", SessionController, :delete
   end
 
-  # Other scopes may use custom stacks.
-  # scope "/api", TerminalUiWeb do
-  #   pipe_through :api
-  # end
+  # Protected: everything else
+  scope "/", TerminalUiWeb do
+    pipe_through [:browser, :require_auth]
+
+    live "/", TerminalLive, :index
+  end
 end

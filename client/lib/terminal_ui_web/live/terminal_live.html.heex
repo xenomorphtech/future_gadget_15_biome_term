@@ -31,6 +31,15 @@
         </li>
       <% end %>
     </ul>
+    <div class="p-2 border-t border-gray-700">
+      <form method="post" action="/logout">
+        <input type="hidden" name="_method" value="delete" />
+        <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+        <button type="submit" class="w-full text-xs text-gray-500 hover:text-gray-300 py-1 text-left px-1">
+          Logout
+        </button>
+      </form>
+    </div>
   </aside>
   <main class="flex-1 flex flex-col overflow-hidden">
     <div

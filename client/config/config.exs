@@ -8,7 +8,8 @@
 import Config
 
 config :terminal_ui,
-  generators: [timestamp_type: :utc_datetime]
+  generators: [timestamp_type: :utc_datetime],
+  auth_password: System.get_env("AUTH_PASSWORD", "changeme")
 
 # Configures the endpoint
 config :terminal_ui, TerminalUiWeb.Endpoint,
