@@ -3,6 +3,8 @@ defmodule TerminalUiWeb.TerminalLive do
 
   alias TerminalUi.{PaneSupervisor, TerminalClient}
 
+  @snippet_submit_delay_ms 500
+
   @impl true
   def mount(_params, _session, socket) do
     socket =
@@ -51,6 +53,15 @@ defmodule TerminalUiWeb.TerminalLive do
     else
       {:noreply, socket}
     end
+  end
+
+  @impl true
+  def handle_info({:send_snippet_enter, id}, socket) do
+    if pane_exists?(socket, id) do
+      send_input(id, "\r")
+    end
+
+    {:noreply, socket}
   end
 
   @impl true
@@ -160,7 +171,10 @@ defmodule TerminalUiWeb.TerminalLive do
     {body, final_enter} = normalize_snippet_input(snippet)
 
     send_input(id, body)
-    send_input(id, final_enter)
+
+    if final_enter != "" do
+      Process.send_after(self(), {:send_snippet_enter, id}, @snippet_submit_delay_ms)
+    end
   end
 
   defp normalize_snippet_input(snippet) do
@@ -174,5 +188,9 @@ defmodule TerminalUiWeb.TerminalLive do
     if String.ends_with?(snippet, "\r"),
       do: binary_part(snippet, 0, byte_size(snippet) - 1),
       else: snippet
+  end
+
+  defp pane_exists?(socket, id) do
+    Enum.any?(socket.assigns.panes, &(&1["id"] == id))
   end
 end
