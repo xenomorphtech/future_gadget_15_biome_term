@@ -11,6 +11,28 @@ use std::sync::Arc;
 use tokio::sync::broadcast::error::RecvError;
 use uuid::Uuid;
 
+/// Subscribe to live PTY output for a pane.
+///
+/// Upgrades the connection to a WebSocket. Historical events are sent first
+/// (subscribe before reading history avoids a race), then new events are
+/// forwarded in real time.
+///
+/// **Frame format** (text, JSON):
+/// ```json
+/// { "seq": 42, "timestamp_ms": 1700000000000, "data": "<base64>" }
+/// ```
+/// `data` is base64-encoded raw PTY output bytes.
+#[utoipa::path(
+    get,
+    path = "/panes/{id}/stream",
+    params(
+        ("id" = Uuid, Path, description = "Pane ID"),
+    ),
+    responses(
+        (status = 101, description = "WebSocket upgrade — streams `{seq, timestamp_ms, data}` JSON frames"),
+        (status = 404, description = "Pane not found"),
+    )
+)]
 pub async fn ws_stream_handler(
     Path(id): Path<Uuid>,
     ws: WebSocketUpgrade,

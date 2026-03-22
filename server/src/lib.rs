@@ -1,12 +1,13 @@
 pub mod error;
 pub mod event;
 pub mod handlers;
+pub mod openapi;
 pub mod pane;
 pub mod state;
 
 use axum::{
     routing::{delete, get, post},
-    Router,
+    Json, Router,
 };
 use handlers::{
     create::create_pane_handler,
@@ -18,7 +19,9 @@ use handlers::{
     screen::get_screen_handler,
     stream::ws_stream_handler,
 };
+use openapi::ApiDoc;
 use state::AppState;
+use utoipa::OpenApi;
 
 pub fn build_router(state: AppState) -> Router {
     Router::new()
@@ -30,5 +33,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/panes/{id}/screen", get(get_screen_handler))
         .route("/panes/{id}/events", get(get_events_handler))
         .route("/panes/{id}/stream", get(ws_stream_handler))
+        .route("/openapi.json", get(openapi_handler))
         .with_state(state)
+}
+
+async fn openapi_handler() -> Json<serde_json::Value> {
+    Json(serde_json::from_str(&ApiDoc::openapi().to_pretty_json().unwrap()).unwrap())
 }

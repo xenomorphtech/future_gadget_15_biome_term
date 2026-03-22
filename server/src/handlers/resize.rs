@@ -6,14 +6,34 @@ use axum::{
 };
 use portable_pty::PtySize;
 use serde::Deserialize;
+use utoipa::ToSchema;
 use uuid::Uuid;
 
-#[derive(Deserialize)]
+/// New terminal dimensions.
+#[derive(Deserialize, ToSchema)]
 pub struct ResizeRequest {
     pub cols: u16,
     pub rows: u16,
 }
 
+/// Resize a pane's terminal dimensions.
+///
+/// Resizes the PTY master (triggering SIGWINCH so the shell redraws), then
+/// replaces the VT100 parser with a fresh instance at the new size.
+/// The shell prompt is typically redrawn within milliseconds.
+#[utoipa::path(
+    post,
+    path = "/panes/{id}/resize",
+    params(
+        ("id" = Uuid, Path, description = "Pane ID"),
+    ),
+    request_body = ResizeRequest,
+    responses(
+        (status = 204, description = "Pane resized"),
+        (status = 404, description = "Pane not found"),
+        (status = 500, description = "PTY resize syscall failed"),
+    )
+)]
 pub async fn resize_pane_handler(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,

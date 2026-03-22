@@ -1,15 +1,26 @@
 use crate::state::AppState;
 use axum::{extract::State, Json};
 use serde::Serialize;
+use utoipa::ToSchema;
 use uuid::Uuid;
 
-#[derive(Serialize)]
+/// Summary of an active pane.
+#[derive(Serialize, ToSchema)]
 pub struct PaneInfo {
+    /// Unique pane identifier
     pub id: Uuid,
     pub cols: u16,
     pub rows: u16,
 }
 
+/// List all active panes.
+#[utoipa::path(
+    get,
+    path = "/panes",
+    responses(
+        (status = 200, description = "Array of active panes", body = Vec<PaneInfo>),
+    )
+)]
 pub async fn list_panes_handler(
     State(state): State<AppState>,
 ) -> Json<Vec<PaneInfo>> {

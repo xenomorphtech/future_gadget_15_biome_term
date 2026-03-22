@@ -5,6 +5,21 @@ use axum::{
 };
 use uuid::Uuid;
 
+/// Kill and remove a pane.
+///
+/// Sends SIGKILL to the shell process and removes the pane from the active set.
+/// Any connected WebSocket subscribers will receive a `Closed` error.
+#[utoipa::path(
+    delete,
+    path = "/panes/{id}",
+    params(
+        ("id" = Uuid, Path, description = "Pane ID"),
+    ),
+    responses(
+        (status = 204, description = "Pane killed and removed"),
+        (status = 404, description = "Pane not found"),
+    )
+)]
 pub async fn delete_pane_handler(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
