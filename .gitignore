@@ -1,0 +1,12 @@
+# Rust
+server/target/
+
+# Elixir/Phoenix
+client/_build/
+client/deps/
+client/.elixir_ls/
+client/priv/static/assets/
+client/.DS_Store
+
+# Node
+node_modules/
