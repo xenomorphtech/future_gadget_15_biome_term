@@ -9,6 +9,8 @@ use uuid::Uuid;
 pub struct PaneInfo {
     /// Unique pane identifier
     pub id: Uuid,
+    /// Human-readable label, if provided at creation
+    pub name: Option<String>,
     pub cols: u16,
     pub rows: u16,
 }
@@ -29,6 +31,7 @@ pub async fn list_panes_handler(
         .iter()
         .map(|entry| PaneInfo {
             id: entry.id,
+            name: entry.name.clone(),
             cols: entry.cols,
             rows: entry.rows,
         })

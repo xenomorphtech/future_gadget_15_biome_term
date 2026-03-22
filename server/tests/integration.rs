@@ -220,3 +220,85 @@ async fn test_list_and_delete() {
         "Deleted pane should not appear in list"
     );
 }
+
+#[tokio::test]
+async fn test_pane_name() {
+    let base = start_test_server().await;
+    let client = reqwest::Client::new();
+
+    // Create a named pane
+    let resp: serde_json::Value = client
+        .post(format!("{base}/panes"))
+        .json(&serde_json::json!({ "cols": 80, "rows": 24, "name": "my-shell" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let id = resp["id"].as_str().unwrap().to_string();
+    assert_eq!(resp["name"].as_str(), Some("my-shell"), "name should be returned on create");
+
+    // Verify name appears in list
+    let list: serde_json::Value = client
+        .get(format!("{base}/panes"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let pane = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"].as_str() == Some(&id))
+        .expect("pane should appear in list");
+
+    assert_eq!(pane["name"].as_str(), Some("my-shell"), "name should appear in list");
+
+    delete_pane(&client, &base, &id).await;
+}
+
+#[tokio::test]
+async fn test_pane_name_optional() {
+    let base = start_test_server().await;
+    let client = reqwest::Client::new();
+
+    // Create a pane without a name
+    let resp: serde_json::Value = client
+        .post(format!("{base}/panes"))
+        .json(&serde_json::json!({ "cols": 80, "rows": 24 }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let id = resp["id"].as_str().unwrap().to_string();
+    assert!(resp["name"].is_null(), "name should be null when not provided");
+
+    // Verify null name in list
+    let list: serde_json::Value = client
+        .get(format!("{base}/panes"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let pane = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"].as_str() == Some(&id))
+        .expect("pane should appear in list");
+
+    assert!(pane["name"].is_null(), "name should be null in list when not set");
+
+    delete_pane(&client, &base, &id).await;
+}

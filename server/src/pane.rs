@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 pub struct Pane {
     pub id: Uuid,
+    pub name: Option<String>,
     pub master: Arc<tokio::sync::Mutex<Box<dyn MasterPty + Send>>>,
     pub writer: Arc<tokio::sync::Mutex<Box<dyn Write + Send>>>,
     /// Child process — wrapped in Option so the delete handler can `take()` it
@@ -21,7 +22,7 @@ pub struct Pane {
     pub rows: u16,
 }
 
-pub fn create_pane(cols: u16, rows: u16, shell: Option<String>) -> Result<Arc<Pane>, String> {
+pub fn create_pane(cols: u16, rows: u16, shell: Option<String>, name: Option<String>) -> Result<Arc<Pane>, String> {
     let pty_system = NativePtySystem::default();
     let pair = pty_system
         .openpty(PtySize {
@@ -66,6 +67,7 @@ pub fn create_pane(cols: u16, rows: u16, shell: Option<String>) -> Result<Arc<Pa
 
     let pane = Arc::new(Pane {
         id,
+        name,
         master,
         writer,
         child: Mutex::new(Some(child)),

@@ -7,6 +7,8 @@ use uuid::Uuid;
 /// Request body for creating a new pane.
 #[derive(Deserialize, ToSchema)]
 pub struct CreatePaneRequest {
+    /// Human-readable label for this pane (optional)
+    pub name: Option<String>,
     /// Terminal width in columns (default: 220)
     pub cols: Option<u16>,
     /// Terminal height in rows (default: 50)
@@ -20,6 +22,8 @@ pub struct CreatePaneRequest {
 pub struct CreatePaneResponse {
     /// Unique pane identifier
     pub id: Uuid,
+    /// Human-readable label, if provided at creation
+    pub name: Option<String>,
     pub cols: u16,
     pub rows: u16,
 }
@@ -44,13 +48,13 @@ pub async fn create_pane_handler(
 ) -> Result<Json<CreatePaneResponse>, AppError> {
     let cols = body.cols.unwrap_or(220);
     let rows = body.rows.unwrap_or(50);
-    let shell = body.shell;
 
-    let pane = create_pane(cols, rows, shell)
+    let pane = create_pane(cols, rows, body.shell, body.name)
         .map_err(|e| AppError::Internal(e))?;
 
     let id = pane.id;
+    let name = pane.name.clone();
     state.panes.insert(id, pane);
 
-    Ok(Json(CreatePaneResponse { id, cols, rows }))
+    Ok(Json(CreatePaneResponse { id, name, cols, rows }))
 }

@@ -24,6 +24,7 @@ List all active panes.
 |-------|------|----------|-------------|
 | `cols` | int32 | ✓ |  |
 | `id` | uuid | ✓ | Unique pane identifier |
+| `name` | string | — | Human-readable label, if provided at creation |
 | `rows` | int32 | ✓ |  |
 
 ---
@@ -41,6 +42,7 @@ immediately; connect via `/panes/{id}/stream` to receive live updates.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `cols` | int32 | — | Terminal width in columns (default: 220) |
+| `name` | string | — | Human-readable label for this pane (optional) |
 | `rows` | int32 | — | Terminal height in rows (default: 50) |
 | `shell` | string | — | Shell executable path (default: /bin/bash) |
 
@@ -57,6 +59,7 @@ immediately; connect via `/panes/{id}/stream` to receive live updates.
 |-------|------|----------|-------------|
 | `cols` | int32 | ✓ |  |
 | `id` | uuid | ✓ | Unique pane identifier |
+| `name` | string | — | Human-readable label, if provided at creation |
 | `rows` | int32 | ✓ |  |
 
 ---
@@ -246,6 +249,7 @@ Request body for creating a new pane.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `cols` | int32 | — | Terminal width in columns (default: 220) |
+| `name` | string | — | Human-readable label for this pane (optional) |
 | `rows` | int32 | — | Terminal height in rows (default: 50) |
 | `shell` | string | — | Shell executable path (default: /bin/bash) |
 
@@ -257,6 +261,7 @@ Created pane descriptor.
 |-------|------|----------|-------------|
 | `cols` | int32 | ✓ |  |
 | `id` | uuid | ✓ | Unique pane identifier |
+| `name` | string | — | Human-readable label, if provided at creation |
 | `rows` | int32 | ✓ |  |
 
 ### `EventResponse`
@@ -285,6 +290,7 @@ Summary of an active pane.
 |-------|------|----------|-------------|
 | `cols` | int32 | ✓ |  |
 | `id` | uuid | ✓ | Unique pane identifier |
+| `name` | string | — | Human-readable label, if provided at creation |
 | `rows` | int32 | ✓ |  |
 
 ### `ResizeRequest`
