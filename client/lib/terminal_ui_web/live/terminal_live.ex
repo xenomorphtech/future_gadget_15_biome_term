@@ -5,7 +5,7 @@ defmodule TerminalUiWeb.TerminalLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    socket = assign(socket, panes: [], selected_pane_id: nil, screen: nil)
+    socket = assign(socket, panes: [], selected_pane_id: nil, screen: nil, new_pane_name: "")
     if connected?(socket), do: send(self(), :load_panes)
     {:ok, socket}
   end
@@ -40,11 +40,47 @@ defmodule TerminalUiWeb.TerminalLive do
   end
 
   @impl true
+  def handle_event("set_new_pane_name", %{"value" => value}, socket) do
+    {:noreply, assign(socket, :new_pane_name, value)}
+  end
+
+  @impl true
+  def handle_event("clear_new_pane_name", _, socket) do
+    {:noreply, assign(socket, :new_pane_name, "")}
+  end
+
+  @impl true
   def handle_event("new_pane", _, socket) do
-    %{"id" => new_id} = TerminalClient.create_pane()
+    name = case String.trim(socket.assigns.new_pane_name) do
+      "" -> nil
+      n  -> n
+    end
+    pane = TerminalClient.create_pane(220, 50, name)
+    new_id = pane["id"]
     PaneSupervisor.ensure_started(new_id)
-    panes = socket.assigns.panes ++ [%{"id" => new_id}]
-    {:noreply, socket |> assign(:panes, panes) |> select_pane(new_id)}
+    panes = socket.assigns.panes ++ [pane]
+    socket = socket |> assign(:panes, panes) |> assign(:new_pane_name, "") |> select_pane(new_id)
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("kill_pane", %{"id" => id}, socket) do
+    TerminalClient.kill_pane(id)
+    PaneSupervisor.stop(id)
+    panes = Enum.reject(socket.assigns.panes, &(&1["id"] == id))
+    socket = assign(socket, :panes, panes)
+
+    socket =
+      if socket.assigns.selected_pane_id == id do
+        case panes do
+          [%{"id" => next_id} | _] -> select_pane(socket, next_id)
+          [] -> assign(socket, selected_pane_id: nil, screen: nil)
+        end
+      else
+        socket
+      end
+
+    {:noreply, socket}
   end
 
   @impl true

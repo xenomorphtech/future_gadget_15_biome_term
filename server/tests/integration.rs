@@ -263,6 +263,41 @@ async fn test_pane_name() {
 }
 
 #[tokio::test]
+async fn test_exit_terminates_pane() {
+    let base = start_test_server().await;
+    let client = reqwest::Client::new();
+
+    let id = create_pane(&client, &base).await;
+    sleep(Duration::from_millis(300)).await;
+
+    send_input(&client, &base, &id, "exit\n").await;
+    sleep(Duration::from_millis(800)).await;
+
+    let list: serde_json::Value = client
+        .get(format!("{base}/panes"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let pane = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"].as_str() == Some(&id))
+        .expect("pane should still appear in list after exit");
+
+    assert!(
+        pane["terminated"].as_bool() == Some(true),
+        "pane should be terminated after shell exits, got: {pane:?}"
+    );
+
+    delete_pane(&client, &base, &id).await;
+}
+
+#[tokio::test]
 async fn test_pane_name_optional() {
     let base = start_test_server().await;
     let client = reqwest::Client::new();

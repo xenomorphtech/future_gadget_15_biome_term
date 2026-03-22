@@ -26,6 +26,7 @@ List all active panes.
 | `id` | uuid | ✓ | Unique pane identifier |
 | `name` | string | — | Human-readable label, if provided at creation |
 | `rows` | int32 | ✓ |  |
+| `terminated` | boolean | ✓ | True when the shell process has exited |
 
 ---
 
@@ -292,6 +293,7 @@ Summary of an active pane.
 | `id` | uuid | ✓ | Unique pane identifier |
 | `name` | string | — | Human-readable label, if provided at creation |
 | `rows` | int32 | ✓ |  |
+| `terminated` | boolean | ✓ | True when the shell process has exited |
 
 ### `ResizeRequest`
 

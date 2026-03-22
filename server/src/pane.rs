@@ -1,6 +1,7 @@
 use crate::event::{Event, EventLog, now_ms};
 use portable_pty::{Child, CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem};
 use std::io::{Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, RwLock};
 use uuid::Uuid;
@@ -20,6 +21,8 @@ pub struct Pane {
     pub broadcast_tx: broadcast::Sender<Arc<Event>>,
     pub cols: u16,
     pub rows: u16,
+    /// Set to true when the PTY read loop exits (shell exited or was killed).
+    pub terminated: Arc<AtomicBool>,
 }
 
 pub fn create_pane(cols: u16, rows: u16, shell: Option<String>, name: Option<String>) -> Result<Arc<Pane>, String> {
@@ -60,6 +63,7 @@ pub fn create_pane(cols: u16, rows: u16, shell: Option<String>, name: Option<Str
     let parser = Arc::new(RwLock::new(vt100::Parser::new(rows, cols, 0)));
     let event_log = Arc::new(RwLock::new(EventLog::new()));
     let (broadcast_tx, _) = broadcast::channel::<Arc<Event>>(256);
+    let terminated = Arc::new(AtomicBool::new(false));
 
     let id = Uuid::new_v4();
     let master = Arc::new(tokio::sync::Mutex::new(pair.master));
@@ -77,9 +81,10 @@ pub fn create_pane(cols: u16, rows: u16, shell: Option<String>, name: Option<Str
         broadcast_tx: broadcast_tx.clone(),
         cols,
         rows,
+        terminated: terminated.clone(),
     });
 
-    spawn_pty_read_loop(reader, parser, event_log, broadcast_tx);
+    spawn_pty_read_loop(reader, parser, event_log, broadcast_tx, terminated);
 
     Ok(pane)
 }
@@ -89,6 +94,7 @@ fn spawn_pty_read_loop(
     parser: Arc<RwLock<vt100::Parser>>,
     event_log: Arc<RwLock<EventLog>>,
     tx: broadcast::Sender<Arc<Event>>,
+    terminated: Arc<AtomicBool>,
 ) {
     tokio::task::spawn_blocking(move || {
         let mut buf = [0u8; 4096];
@@ -120,5 +126,6 @@ fn spawn_pty_read_loop(
                 }
             }
         }
+        terminated.store(true, Ordering::Relaxed);
     });
 }

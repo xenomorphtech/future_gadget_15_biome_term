@@ -5,8 +5,10 @@ defmodule TerminalUi.TerminalClient do
     Req.get!(@base <> "/panes").body
   end
 
-  def create_pane(cols \\ 220, rows \\ 50) do
-    Req.post!(@base <> "/panes", json: %{cols: cols, rows: rows}).body
+  def create_pane(cols \\ 220, rows \\ 50, name \\ nil) do
+    body = %{cols: cols, rows: rows}
+    body = if name, do: Map.put(body, :name, name), else: body
+    Req.post!(@base <> "/panes", json: body).body
   end
 
   def kill_pane(id) do
