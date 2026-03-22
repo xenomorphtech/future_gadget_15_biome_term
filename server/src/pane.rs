@@ -11,9 +11,9 @@ pub struct Pane {
     pub name: Option<String>,
     pub master: Arc<tokio::sync::Mutex<Box<dyn MasterPty + Send>>>,
     pub writer: Arc<tokio::sync::Mutex<Box<dyn Write + Send>>>,
-    /// Child process — wrapped in Option so the delete handler can `take()` it
-    /// and drop it in a spawn_blocking task (Child::drop calls waitpid).
-    pub child: Mutex<Option<Box<dyn Child + Send + Sync>>>,
+    /// Child process — wrapped in Arc<Mutex<Option>> so both the read loop
+    /// and the delete handler can race to take() and reap it exactly once.
+    pub child: Arc<Mutex<Option<Box<dyn Child + Send + Sync>>>>,
     /// PID stored at creation time so delete can kill without locking.
     pub child_pid: Option<u32>,
     pub parser: Arc<RwLock<vt100::Parser>>,
@@ -74,7 +74,7 @@ pub fn create_pane(cols: u16, rows: u16, shell: Option<String>, name: Option<Str
         name,
         master,
         writer,
-        child: Mutex::new(Some(child)),
+        child: Arc::new(Mutex::new(Some(child))),
         child_pid,
         parser: parser.clone(),
         event_log: event_log.clone(),
@@ -84,7 +84,8 @@ pub fn create_pane(cols: u16, rows: u16, shell: Option<String>, name: Option<Str
         terminated: terminated.clone(),
     });
 
-    spawn_pty_read_loop(reader, parser, event_log, broadcast_tx, terminated);
+    let child_arc = Arc::clone(&pane.child);
+    spawn_pty_read_loop(reader, parser, event_log, broadcast_tx, terminated, child_arc);
 
     Ok(pane)
 }
@@ -95,6 +96,7 @@ fn spawn_pty_read_loop(
     event_log: Arc<RwLock<EventLog>>,
     tx: broadcast::Sender<Arc<Event>>,
     terminated: Arc<AtomicBool>,
+    child: Arc<Mutex<Option<Box<dyn Child + Send + Sync>>>>,
 ) {
     tokio::task::spawn_blocking(move || {
         let mut buf = [0u8; 4096];
@@ -127,5 +129,10 @@ fn spawn_pty_read_loop(
             }
         }
         terminated.store(true, Ordering::Relaxed);
+        // Reap the child (calls waitpid) to avoid zombie processes.
+        // If delete_pane already took it, take() returns None — that's fine.
+        if let Ok(mut guard) = child.lock() {
+            drop(guard.take());
+        }
     });
 }
