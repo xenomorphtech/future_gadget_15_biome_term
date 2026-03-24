@@ -58,10 +58,10 @@ pub async fn resize_pane_handler(
             .map_err(|e| AppError::Internal(format!("resize failed: {e}")))?;
     }
 
-    // Replace the vt100 parser — it has no resize() method
+    // Resize the vt100 parser's screen in place — preserves terminal state
     {
         let mut parser = pane.parser.write().await;
-        *parser = vt100::Parser::new(body.rows, body.cols, 0);
+        parser.screen_mut().set_size(body.rows, body.cols);
     }
 
     Ok(StatusCode::NO_CONTENT)

@@ -1,4 +1,7 @@
+use std::collections::VecDeque;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+const DEFAULT_MAX_EVENTS: usize = 10_000;
 
 #[derive(Clone)]
 pub struct Event {
@@ -8,15 +11,17 @@ pub struct Event {
 }
 
 pub struct EventLog {
-    events: Vec<Event>,
+    events: VecDeque<Event>,
     next_seq: u64,
+    max_events: usize,
 }
 
 impl EventLog {
     pub fn new() -> Self {
         EventLog {
-            events: Vec::new(),
+            events: VecDeque::new(),
             next_seq: 1,
+            max_events: DEFAULT_MAX_EVENTS,
         }
     }
 
@@ -27,17 +32,30 @@ impl EventLog {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
-        self.events.push(Event { seq, timestamp_ms, data });
+        if self.events.len() >= self.max_events {
+            self.events.pop_front();
+        }
+        self.events.push_back(Event {
+            seq,
+            timestamp_ms,
+            data,
+        });
         seq
     }
 
-    /// Returns events with seq > after_seq. after=0 returns all events.
+    /// Returns events with seq > after_seq. after=0 returns all retained events.
+    /// If after_seq is older than the oldest retained event, returns all retained events.
     pub fn since(&self, after_seq: u64) -> Vec<Event> {
-        self.events
-            .iter()
-            .filter(|e| e.seq > after_seq)
-            .cloned()
-            .collect()
+        if self.events.is_empty() {
+            return Vec::new();
+        }
+        let start = self.events.partition_point(|e| e.seq <= after_seq);
+        self.events.iter().skip(start).cloned().collect()
+    }
+
+    /// Returns the seq of the oldest retained event, or None if empty.
+    pub fn oldest_seq(&self) -> Option<u64> {
+        self.events.front().map(|e| e.seq)
     }
 }
 

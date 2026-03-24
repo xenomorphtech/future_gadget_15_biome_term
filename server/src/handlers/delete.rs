@@ -1,4 +1,4 @@
-use crate::{error::AppError, state::AppState};
+use crate::{error::AppError, pane_lifecycle::PaneLifecycleEvent, state::AppState};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -29,18 +29,25 @@ pub async fn delete_pane_handler(
         .remove(&id)
         .ok_or_else(|| AppError::NotFound(format!("pane {id} not found")))?;
 
+    let _ = state
+        .pane_lifecycle_tx
+        .send(PaneLifecycleEvent::Deleted { id });
+
     // SIGKILL: cannot be caught or ignored; ensures bash exits even in
     // interactive mode (which ignores SIGTERM). When bash exits, the slave
     // PTY fd closes, which unblocks the spawn_blocking reader with EIO.
     if let Some(pid) = pane.child_pid {
-        unsafe {
-            libc::kill(pid as libc::pid_t, libc::SIGKILL);
+        let pid = pid as libc::pid_t;
+        if pid > 0 {
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+            }
         }
     }
 
     // Take the child out of the Option (synchronous std::sync::Mutex — no await)
     // then drop it on a blocking thread, because Child::drop calls waitpid().
-    let child = pane.child.lock().unwrap().take();
+    let child = pane.child.lock().unwrap_or_else(|e| e.into_inner()).take();
     if let Some(child) = child {
         tokio::task::spawn_blocking(move || drop(child));
     }

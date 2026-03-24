@@ -1,9 +1,9 @@
 use crate::{error::AppError, pane::Pane, state::AppState};
+use axum::extract::ws::{Message, WebSocket};
 use axum::{
     extract::{Path, State, WebSocketUpgrade},
     response::Response,
 };
-use axum::extract::ws::{Message, WebSocket};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
@@ -93,8 +93,21 @@ async fn handle_ws(socket: WebSocket, pane: Arc<Pane>) {
                         }
                     }
                     Err(RecvError::Lagged(n)) => {
-                        eprintln!("WS client lagged by {n} events");
-                        // Continue — next recv() will catch up
+                        eprintln!("WS client lagged by {n} events, sending screen snapshot");
+                        let parser = pane.parser.read().await;
+                        let contents = parser.screen().contents();
+                        drop(parser);
+                        let snapshot_msg = json!({
+                            "type": "snapshot",
+                            "screen": contents,
+                        });
+                        if ws_tx
+                            .send(Message::Text(snapshot_msg.to_string().into()))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
                     }
                     Err(RecvError::Closed) => break,
                 }

@@ -3,21 +3,18 @@ pub mod event;
 pub mod handlers;
 pub mod openapi;
 pub mod pane;
+pub mod pane_lifecycle;
 pub mod state;
 
 use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
+use std::sync::LazyLock;
 use handlers::{
-    create::create_pane_handler,
-    delete::delete_pane_handler,
-    events::get_events_handler,
-    input::send_input_handler,
-    list::list_panes_handler,
-    resize::resize_pane_handler,
-    screen::get_screen_handler,
-    stream::ws_stream_handler,
+    create::create_pane_handler, delete::delete_pane_handler, events::get_events_handler,
+    input::send_input_handler, lifecycle::ws_pane_lifecycle_handler, list::list_panes_handler,
+    resize::resize_pane_handler, screen::get_screen_handler, stream::ws_stream_handler,
 };
 use openapi::ApiDoc;
 use state::AppState;
@@ -27,6 +24,7 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/panes", post(create_pane_handler))
         .route("/panes", get(list_panes_handler))
+        .route("/panes/lifecycle", get(ws_pane_lifecycle_handler))
         .route("/panes/{id}", delete(delete_pane_handler))
         .route("/panes/{id}/input", post(send_input_handler))
         .route("/panes/{id}/resize", post(resize_pane_handler))
@@ -37,6 +35,13 @@ pub fn build_router(state: AppState) -> Router {
         .with_state(state)
 }
 
+static OPENAPI_JSON: LazyLock<serde_json::Value> = LazyLock::new(|| {
+    let json_str = ApiDoc::openapi()
+        .to_pretty_json()
+        .expect("OpenAPI schema serialization failed");
+    serde_json::from_str(&json_str).expect("OpenAPI schema is not valid JSON")
+});
+
 async fn openapi_handler() -> Json<serde_json::Value> {
-    Json(serde_json::from_str(&ApiDoc::openapi().to_pretty_json().unwrap()).unwrap())
+    Json(OPENAPI_JSON.clone())
 }

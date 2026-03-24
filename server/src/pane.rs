@@ -1,4 +1,4 @@
-use crate::event::{Event, EventLog, now_ms};
+use crate::event::{now_ms, Event, EventLog};
 use portable_pty::{Child, CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem};
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,7 +25,12 @@ pub struct Pane {
     pub terminated: Arc<AtomicBool>,
 }
 
-pub fn create_pane(cols: u16, rows: u16, shell: Option<String>, name: Option<String>) -> Result<Arc<Pane>, String> {
+pub fn create_pane(
+    cols: u16,
+    rows: u16,
+    shell: Option<String>,
+    name: Option<String>,
+) -> Result<Arc<Pane>, String> {
     let pty_system = NativePtySystem::default();
     let pair = pty_system
         .openpty(PtySize {
@@ -62,7 +67,7 @@ pub fn create_pane(cols: u16, rows: u16, shell: Option<String>, name: Option<Str
 
     let parser = Arc::new(RwLock::new(vt100::Parser::new(rows, cols, 0)));
     let event_log = Arc::new(RwLock::new(EventLog::new()));
-    let (broadcast_tx, _) = broadcast::channel::<Arc<Event>>(256);
+    let (broadcast_tx, _) = broadcast::channel::<Arc<Event>>(4096);
     let terminated = Arc::new(AtomicBool::new(false));
 
     let id = Uuid::new_v4();
@@ -85,7 +90,14 @@ pub fn create_pane(cols: u16, rows: u16, shell: Option<String>, name: Option<Str
     });
 
     let child_arc = Arc::clone(&pane.child);
-    spawn_pty_read_loop(reader, parser, event_log, broadcast_tx, terminated, child_arc);
+    spawn_pty_read_loop(
+        reader,
+        parser,
+        event_log,
+        broadcast_tx,
+        terminated,
+        child_arc,
+    );
 
     Ok(pane)
 }
