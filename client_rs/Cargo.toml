@@ -1,0 +1,24 @@
+[package]
+name = "biome-term-client"
+version = "0.1.0"
+edition = "2021"
+description = "Native Rust client for the biome_term PTY server"
+
+[lib]
+name = "biome_term_client"
+path = "src/lib.rs"
+
+[[bin]]
+name = "biome-term"
+path = "src/bin/biome_term.rs"
+
+[dependencies]
+reqwest           = { version = "0.12", features = ["json"] }
+tokio             = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.26"
+serde             = { version = "1.0", features = ["derive"] }
+serde_json        = "1.0"
+base64            = "0.22"
+futures-util      = "0.3"
+clap              = { version = "4", features = ["derive", "env"] }
+thiserror         = "1"
