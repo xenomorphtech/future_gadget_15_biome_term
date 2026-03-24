@@ -55,6 +55,25 @@ async fn delete_pane(client: &reqwest::Client, base: &str, id: &str) {
         .unwrap();
 }
 
+async fn recv_lifecycle_event(
+    ws: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+) -> serde_json::Value {
+    use futures_util::StreamExt;
+
+    loop {
+        match ws.next().await {
+            Some(Ok(tokio_tungstenite::tungstenite::Message::Text(txt))) => {
+                return serde_json::from_str(&txt).unwrap();
+            }
+            Some(Ok(_)) => {}
+            Some(Err(err)) => panic!("websocket error: {err}"),
+            None => panic!("websocket closed unexpectedly"),
+        }
+    }
+}
+
 #[tokio::test]
 async fn test_echo_hello() {
     let base = start_test_server().await;
@@ -222,6 +241,47 @@ async fn test_list_and_delete() {
 }
 
 #[tokio::test]
+async fn test_pane_lifecycle_stream() {
+    use tokio_tungstenite::connect_async;
+
+    let base = start_test_server().await;
+    let ws_base = base.replace("http://", "ws://");
+    let client = reqwest::Client::new();
+
+    let (mut ws, _) = connect_async(format!("{ws_base}/panes/lifecycle"))
+        .await
+        .unwrap();
+
+    let snapshot = recv_lifecycle_event(&mut ws).await;
+    assert_eq!(snapshot["type"].as_str(), Some("snapshot"));
+
+    let resp: serde_json::Value = client
+        .post(format!("{base}/panes"))
+        .json(&serde_json::json!({ "cols": 80, "rows": 24, "name": "streamed" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let id = resp["id"].as_str().unwrap().to_string();
+
+    let created = recv_lifecycle_event(&mut ws).await;
+    assert_eq!(created["type"].as_str(), Some("created"));
+    assert_eq!(created["pane"]["id"].as_str(), Some(id.as_str()));
+    assert_eq!(created["pane"]["name"].as_str(), Some("streamed"));
+
+    delete_pane(&client, &base, &id).await;
+
+    let deleted = recv_lifecycle_event(&mut ws).await;
+    assert_eq!(deleted["type"].as_str(), Some("deleted"));
+    assert_eq!(deleted["id"].as_str(), Some(id.as_str()));
+
+    ws.close(None).await.ok();
+}
+
+#[tokio::test]
 async fn test_pane_name() {
     let base = start_test_server().await;
     let client = reqwest::Client::new();
@@ -238,7 +298,11 @@ async fn test_pane_name() {
         .unwrap();
 
     let id = resp["id"].as_str().unwrap().to_string();
-    assert_eq!(resp["name"].as_str(), Some("my-shell"), "name should be returned on create");
+    assert_eq!(
+        resp["name"].as_str(),
+        Some("my-shell"),
+        "name should be returned on create"
+    );
 
     // Verify name appears in list
     let list: serde_json::Value = client
@@ -257,7 +321,11 @@ async fn test_pane_name() {
         .find(|p| p["id"].as_str() == Some(&id))
         .expect("pane should appear in list");
 
-    assert_eq!(pane["name"].as_str(), Some("my-shell"), "name should appear in list");
+    assert_eq!(
+        pane["name"].as_str(),
+        Some("my-shell"),
+        "name should appear in list"
+    );
 
     delete_pane(&client, &base, &id).await;
 }
@@ -314,7 +382,10 @@ async fn test_pane_name_optional() {
         .unwrap();
 
     let id = resp["id"].as_str().unwrap().to_string();
-    assert!(resp["name"].is_null(), "name should be null when not provided");
+    assert!(
+        resp["name"].is_null(),
+        "name should be null when not provided"
+    );
 
     // Verify null name in list
     let list: serde_json::Value = client
@@ -333,7 +404,10 @@ async fn test_pane_name_optional() {
         .find(|p| p["id"].as_str() == Some(&id))
         .expect("pane should appear in list");
 
-    assert!(pane["name"].is_null(), "name should be null in list when not set");
+    assert!(
+        pane["name"].is_null(),
+        "name should be null in list when not set"
+    );
 
     delete_pane(&client, &base, &id).await;
 }

@@ -21,6 +21,19 @@ if System.get_env("PHX_SERVER") do
 end
 
 if config_env() == :prod do
+  auth_password_file =
+    System.get_env("AUTH_PASSWORD_FILE") ||
+      Path.expand(".auth_password", File.cwd!())
+
+  auth_password =
+    case File.read(auth_password_file) do
+      {:ok, contents} ->
+        String.trim_trailing(contents)
+
+      {:error, _reason} ->
+        System.get_env("AUTH_PASSWORD") || "changeme"
+    end
+
   # The secret key base is used to sign/encrypt cookies and other secrets.
   # A default value is used in config/dev.exs and config/test.exs but you
   # want to use a different value for prod and you most likely don't want
@@ -37,6 +50,7 @@ if config_env() == :prod do
   port = String.to_integer(System.get_env("PORT") || "4000")
 
   config :terminal_ui, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
+  config :terminal_ui, auth_password: auth_password
 
   config :terminal_ui, TerminalUiWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],

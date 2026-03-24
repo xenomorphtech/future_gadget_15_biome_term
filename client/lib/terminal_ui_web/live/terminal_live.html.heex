@@ -1,22 +1,24 @@
 <div class="flex h-screen bg-gray-900 text-gray-100 font-mono">
   <aside class="w-56 bg-gray-800 border-r border-gray-700 flex flex-col">
-    <div class="p-2 border-b border-gray-700 flex gap-1">
+    <form
+      phx-change="set_new_pane_name"
+      phx-submit="new_pane"
+      class="p-2 border-b border-gray-700 flex gap-1"
+    >
       <input
         type="text"
+        name="pane_name"
         placeholder="name…"
         value={@new_pane_name}
-        phx-keyup="set_new_pane_name"
-        phx-key="Enter"
-        phx-click-away="clear_new_pane_name"
         class="flex-1 min-w-0 bg-gray-700 text-gray-100 text-xs px-2 py-1 rounded placeholder-gray-500 outline-none focus:ring-1 focus:ring-blue-500"
       />
       <button
-        phx-click="new_pane"
+        type="submit"
         class="text-xs bg-green-700 text-white px-2 py-1 rounded shrink-0"
       >
         + New
       </button>
-    </div>
+    </form>
     <ul class="flex-1 overflow-y-auto py-1">
       <%= for pane <- @panes do %>
         <li class="flex items-center group">
@@ -25,13 +27,20 @@
             phx-value-id={pane["id"]}
             class={
               if @selected_pane_id == pane["id"],
-                do: "bg-blue-700 text-white flex-1 text-left px-3 py-1 text-sm truncate",
-                else:
-                  "text-gray-400 hover:bg-gray-700 flex-1 text-left px-3 py-1 text-sm truncate"
+                do: "bg-blue-700 text-white flex-1 text-left px-3 py-1 text-sm",
+                else: "text-gray-400 hover:bg-gray-700 flex-1 text-left px-3 py-1 text-sm"
             }
           >
-            {if pane["terminated"], do: "✗ ", else: ""}{pane["name"] ||
-              String.slice(pane["id"], 0, 8) <> "…"}
+            <span class="flex items-center justify-between gap-2">
+              <span class="min-w-0 truncate">
+                {if pane["terminated"], do: "✗ ", else: ""}{pane_display_name(pane)}
+              </span>
+              <%= if show_idle_badge?(pane, @pane_buffers) do %>
+                <span class="shrink-0 text-[11px] font-semibold text-amber-300">
+                  {pane_idle_seconds(@pane_buffers, pane["id"])}s
+                </span>
+              <% end %>
+            </span>
           </button>
           <button
             phx-click="kill_pane"
@@ -75,22 +84,45 @@
       <% end %>
     </div>
     <form
+      id="snippet-form"
       phx-change="set_snippet"
       phx-submit="inject_snippet"
+      phx-hook="SnippetInput"
+      data-history-scope={@selected_pane_id || ""}
       class="border-t border-gray-800 bg-gray-950 p-3"
     >
       <div class="flex items-end gap-3">
         <div class="flex-1">
-          <label
-            for="snippet-input"
-            class="mb-2 block text-xs font-semibold uppercase tracking-wide text-gray-400"
-          >
-            Inject Snippet
-          </label>
+          <div class="mb-2 flex items-center justify-between gap-3">
+            <label
+              for="snippet-input"
+              class="block text-xs font-semibold uppercase tracking-wide text-gray-400"
+            >
+              Inject Snippet
+            </label>
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] text-gray-500">Alt+↑ / Alt+↓ history</span>
+              <button
+                type="button"
+                data-history-nav="prev"
+                disabled={is_nil(@selected_pane_id)}
+                class="rounded border border-gray-700 px-2 py-1 text-[11px] font-semibold text-gray-300 disabled:cursor-not-allowed disabled:border-gray-800 disabled:text-gray-600"
+              >
+                Prev
+              </button>
+              <button
+                type="button"
+                data-history-nav="next"
+                disabled={is_nil(@selected_pane_id)}
+                class="rounded border border-gray-700 px-2 py-1 text-[11px] font-semibold text-gray-300 disabled:cursor-not-allowed disabled:border-gray-800 disabled:text-gray-600"
+              >
+                Next
+              </button>
+            </div>
+          </div>
           <textarea
             id="snippet-input"
             name="snippet"
-            phx-hook="SnippetInput"
             rows="5"
             class="w-full resize-y rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
             placeholder="Paste multiline input here. It will be sent to the selected pane through the input API."

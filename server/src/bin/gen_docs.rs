@@ -45,7 +45,9 @@ fn render_markdown(spec: &Value) -> String {
 
     for (path, path_item) in &paths {
         for method in method_order {
-            let Some(op) = path_item.get(method) else { continue };
+            let Some(op) = path_item.get(method) else {
+                continue;
+            };
 
             let summary = op["summary"].as_str().unwrap_or("");
             let description = op["description"].as_str().unwrap_or("");
@@ -88,7 +90,11 @@ fn render_markdown(spec: &Value) -> String {
                     for p in &query_params {
                         let name = p["name"].as_str().unwrap_or("");
                         let typ = schema_type_name(&p["schema"], schemas);
-                        let req = if p["required"].as_bool() == Some(true) { "✓" } else { "—" };
+                        let req = if p["required"].as_bool() == Some(true) {
+                            "✓"
+                        } else {
+                            "—"
+                        };
                         let desc = p["description"].as_str().unwrap_or("");
                         out += &format!("| `{name}` | {typ} | {req} | {desc} |\n");
                     }
@@ -98,10 +104,8 @@ fn render_markdown(spec: &Value) -> String {
 
             // Request body
             if let Some(body) = op.get("requestBody") {
-                let schema = resolve_schema(
-                    &body["content"]["application/json"]["schema"],
-                    schemas,
-                );
+                let schema =
+                    resolve_schema(&body["content"]["application/json"]["schema"], schemas);
                 if !schema.is_null() {
                     out += "**Request Body** (`application/json`)\n\n";
                     out += &render_schema_fields(schema, schemas);
@@ -137,17 +141,24 @@ fn render_markdown(spec: &Value) -> String {
                 for (code, resp) in &codes {
                     if code.starts_with('2') {
                         let body_schema = &resp["content"]["application/json"]["schema"];
-                        if body_schema.is_null() { continue; }
+                        if body_schema.is_null() {
+                            continue;
+                        }
                         let resolved = resolve_schema(body_schema, schemas);
                         // array wrapper?
-                        let (is_array, item_schema) = if resolved["type"].as_str() == Some("array") {
+                        let (is_array, item_schema) = if resolved["type"].as_str() == Some("array")
+                        {
                             (true, resolve_schema(&resolved["items"], schemas))
                         } else {
                             (false, resolved)
                         };
                         let fields = render_schema_fields(item_schema, schemas);
                         if !fields.is_empty() {
-                            let label = if is_array { "Response Body (array items)" } else { "Response Body" };
+                            let label = if is_array {
+                                "Response Body (array items)"
+                            } else {
+                                "Response Body"
+                            };
                             out += &format!("**{label}**\n\n{fields}\n");
                         }
                     }
@@ -256,7 +267,11 @@ fn render_schema_fields(schema: &Value, schemas: &Value) -> String {
     for key in keys {
         let prop = &props[key.as_str()];
         let typ = schema_type_name(prop, schemas);
-        let req = if required.contains(&key.as_str()) { "✓" } else { "—" };
+        let req = if required.contains(&key.as_str()) {
+            "✓"
+        } else {
+            "—"
+        };
         let desc = prop["description"].as_str().unwrap_or("");
         table += &format!("| `{key}` | {typ} | {req} | {desc} |\n");
     }

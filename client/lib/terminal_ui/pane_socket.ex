@@ -2,7 +2,7 @@ defmodule TerminalUi.PaneSocket do
   use WebSockex
 
   def start_link(pane_id) do
-    url = "ws://localhost:3000/panes/#{pane_id}/stream"
+    url = TerminalUi.TerminalClient.ws_url("/panes/#{pane_id}/stream")
     name = {:via, Registry, {TerminalUi.PaneRegistry, pane_id}}
 
     WebSockex.start_link(url, __MODULE__, %{pane_id: pane_id},
@@ -39,6 +39,15 @@ defmodule TerminalUi.PaneSocket do
           TerminalUi.PubSub,
           "panes",
           {:pane_terminated, state.pane_id}
+        )
+
+        {:ok, state}
+
+      {:error, :not_found} ->
+        Phoenix.PubSub.broadcast(
+          TerminalUi.PubSub,
+          "panes",
+          {:pane_deleted, state.pane_id}
         )
 
         {:ok, state}

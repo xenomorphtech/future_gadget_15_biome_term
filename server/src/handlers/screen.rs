@@ -1,5 +1,8 @@
 use crate::{error::AppError, state::AppState};
-use axum::{extract::{Path, State}, Json};
+use axum::{
+    extract::{Path, State},
+    Json,
+};
 use serde::Serialize;
 use utoipa::ToSchema;
 use uuid::Uuid;

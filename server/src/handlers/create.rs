@@ -1,4 +1,7 @@
-use crate::{error::AppError, pane::create_pane, state::AppState};
+use crate::{
+    error::AppError, handlers::list::PaneInfo, pane::create_pane,
+    pane_lifecycle::PaneLifecycleEvent, state::AppState,
+};
 use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -49,12 +52,20 @@ pub async fn create_pane_handler(
     let cols = body.cols.unwrap_or(220);
     let rows = body.rows.unwrap_or(50);
 
-    let pane = create_pane(cols, rows, body.shell, body.name)
-        .map_err(|e| AppError::Internal(e))?;
+    let pane = create_pane(cols, rows, body.shell, body.name).map_err(|e| AppError::Internal(e))?;
 
     let id = pane.id;
     let name = pane.name.clone();
+    let pane_info = PaneInfo::from_pane(&pane);
     state.panes.insert(id, pane);
+    let _ = state
+        .pane_lifecycle_tx
+        .send(PaneLifecycleEvent::Created { pane: pane_info });
 
-    Ok(Json(CreatePaneResponse { id, name, cols, rows }))
+    Ok(Json(CreatePaneResponse {
+        id,
+        name,
+        cols,
+        rows,
+    }))
 }

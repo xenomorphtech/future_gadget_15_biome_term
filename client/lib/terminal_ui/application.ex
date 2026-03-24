@@ -7,15 +7,25 @@ defmodule TerminalUi.Application do
 
   @impl true
   def start(_type, _args) do
-    children = [
-      {Phoenix.PubSub, name: TerminalUi.PubSub},
-      {Registry, keys: :unique, name: TerminalUi.PaneRegistry},
-      TerminalUi.PaneSupervisor,
-      TerminalUiWeb.Telemetry,
-      {DNSCluster, query: Application.get_env(:terminal_ui, :dns_cluster_query) || :ignore},
-      # Start to serve requests, typically the last entry
-      TerminalUiWeb.Endpoint
-    ]
+    lifecycle_children =
+      if Application.get_env(:terminal_ui, :start_pane_lifecycle_socket, true) do
+        [TerminalUi.PaneLifecycleSocket]
+      else
+        []
+      end
+
+    children =
+      [
+        {Phoenix.PubSub, name: TerminalUi.PubSub},
+        lifecycle_children,
+        {Registry, keys: :unique, name: TerminalUi.PaneRegistry},
+        TerminalUi.PaneSupervisor,
+        TerminalUiWeb.Telemetry,
+        {DNSCluster, query: Application.get_env(:terminal_ui, :dns_cluster_query) || :ignore},
+        # Start to serve requests, typically the last entry
+        TerminalUiWeb.Endpoint
+      ]
+      |> List.flatten()
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
