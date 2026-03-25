@@ -8,7 +8,7 @@ use futures_util::StreamExt;
 #[command(name = "biome-term", about = "CLI for the biome_term PTY server")]
 struct Cli {
     /// Server base URL
-    #[arg(long, env = "BIOME_TERM_URL", default_value = "http://localhost:3000")]
+    #[arg(long, env = "BIOME_TERM_URL", default_value = "http://localhost:3021")]
     url: String,
 
     #[command(subcommand)]
@@ -69,8 +69,18 @@ async fn main() {
 
 async fn run(cmd: Cmd, client: BiomeTermClient) -> Result<(), biome_term_client::Error> {
     match cmd {
-        Cmd::Create { name, cols, rows, shell } => {
-            let opts = CreatePaneOptions { cols: Some(cols), rows: Some(rows), shell, name };
+        Cmd::Create {
+            name,
+            cols,
+            rows,
+            shell,
+        } => {
+            let opts = CreatePaneOptions {
+                cols: Some(cols),
+                rows: Some(rows),
+                shell,
+                name,
+            };
             let pane = client.create_pane(opts).await?;
             println!("{}", serde_json::to_string_pretty(&pane).unwrap());
         }
@@ -81,12 +91,22 @@ async fn run(cmd: Cmd, client: BiomeTermClient) -> Result<(), biome_term_client:
                 println!("(no panes)");
                 return Ok(());
             }
-            println!("{:<38} {:<20} {:>4} {:>4}  STATUS", "ID", "NAME", "COLS", "ROWS");
+            println!(
+                "{:<38} {:<20} {:>4} {:>4}  STATUS",
+                "ID", "NAME", "COLS", "ROWS"
+            );
             println!("{}", "-".repeat(75));
             for p in &panes {
                 let name = p.name.as_deref().unwrap_or("-");
-                let status = if p.terminated { "terminated" } else { "running" };
-                println!("{:<38} {:<20} {:>4} {:>4}  {}", p.id, name, p.cols, p.rows, status);
+                let status = if p.terminated {
+                    "terminated"
+                } else {
+                    "running"
+                };
+                println!(
+                    "{:<38} {:<20} {:>4} {:>4}  {}",
+                    p.id, name, p.cols, p.rows, status
+                );
             }
         }
 

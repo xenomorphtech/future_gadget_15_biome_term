@@ -15,7 +15,7 @@ snapshot API lets new clients catch up instantly.
            │
 ┌──────────┴───────────┐     HTTP + WS      ┌──────────────────────┐
 │  biome-term-client   │ ←────────────────→ │   Rust PTY Server    │
-│  (Rust client lib    │                    │   (port 3000)        │
+│  (Rust client lib    │                    │   (port 3021)        │
 │   + CLI binary)      │                    │  vt100 emulator      │
 └──────────────────────┘                    └──────────────────────┘
            ▲
@@ -44,7 +44,7 @@ Features:
 
 ```bash
 cd gui_client_rs && cargo run
-# or set BIOME_TERM_URL=http://host:3000 cargo run
+# or set BIOME_TERM_URL=http://host:3021 cargo run
 ```
 
 ### CLI (`client_rs`)
@@ -84,7 +84,7 @@ cd client && mix phx.server   # → http://localhost:4000
 ```
 
 For the default local-only server wiring, the Rust backend listens on
-`127.0.0.1:3000` and the Phoenix client talks to `http://localhost:3000`.
+`127.0.0.1:3021` and the Phoenix client talks to `http://localhost:3021`.
 
 ## Project Layout
 
@@ -105,9 +105,9 @@ biome_term/
 
 ## API
 
-The Rust server always exposes local HTTP + WebSocket access on `127.0.0.1:3000`
+The Rust server always exposes local HTTP + WebSocket access on `127.0.0.1:3021`
 by default. If `BIOME_TLS_CERT` and `BIOME_TLS_KEY` are set, it also exposes
-HTTPS/WSS on `BIOME_TLS_LISTEN_ADDR` (default `0.0.0.0:3443`), which must use
+HTTPS/WSS on `BIOME_TLS_LISTEN_ADDR` (default `0.0.0.0:3027`), which must use
 a different port than the local HTTP listener.
 
 ## Runtime Configuration
@@ -117,11 +117,11 @@ a different port than the local HTTP listener.
 - `LISTEN_ADDR`: chooses the HTTP port, but the host is always forced to `127.0.0.1`. For example, `LISTEN_ADDR=0.0.0.0:3100` still binds HTTP to `127.0.0.1:3100`.
 - `BIOME_API_KEY`: if set, all HTTP and WebSocket endpoints require either `Authorization: Bearer <key>` or `X-API-Key: <key>`. If unset, the server stays open for backwards compatibility.
 - `BIOME_TLS_CERT` and `BIOME_TLS_KEY`: enable HTTPS/WSS when both are set to certificate and private-key files.
-- `BIOME_TLS_LISTEN_ADDR`: HTTPS bind address, default `0.0.0.0:3443`. This port must differ from the HTTP port.
+- `BIOME_TLS_LISTEN_ADDR`: HTTPS bind address, default `0.0.0.0:3027`. This port must differ from the HTTP port.
 
 ### Client
 
-- `BIOME_URL`: base URL for the Rust server. Use `http://localhost:3000` for local HTTP or something like `https://host.example:3443` when TLS is enabled.
+- `BIOME_URL`: base URL for the Rust server. Use `http://localhost:3021` for local HTTP or something like `https://host.example:3027` when TLS is enabled.
 - `BIOME_API_KEY`: API key sent by the Elixir client for both `Req` requests and websocket handshakes.
 
 ### Example
@@ -132,16 +132,16 @@ cd server
 cargo run
 
 # HTTPS enabled on a separate port, while HTTP stays on localhost
-LISTEN_ADDR=127.0.0.1:3000 \
+LISTEN_ADDR=127.0.0.1:3021 \
 BIOME_TLS_CERT=/path/to/server.crt \
 BIOME_TLS_KEY=/path/to/server.key \
-BIOME_TLS_LISTEN_ADDR=0.0.0.0:3443 \
+BIOME_TLS_LISTEN_ADDR=0.0.0.0:3027 \
 BIOME_API_KEY=changeme \
 cargo run
 
 # Phoenix client pointed at the HTTPS listener
 cd ../client
-BIOME_URL=https://localhost:3443 BIOME_API_KEY=changeme mix phx.server
+BIOME_URL=https://localhost:3027 BIOME_API_KEY=changeme mix phx.server
 ```
 
 See **[docs/api.md](docs/api.md)** for the full reference (also live at `GET /openapi.json`).

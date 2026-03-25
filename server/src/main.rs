@@ -133,7 +133,7 @@ struct HttpConfig {
 impl HttpConfig {
     fn from_env() -> Self {
         let configured_addr =
-            env::var("LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:3000".to_string());
+            env::var("LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:3021".to_string());
         let port = resolve_port(&configured_addr, "LISTEN_ADDR");
 
         Self {
@@ -161,7 +161,7 @@ impl TlsConfig {
         match (cert_path, key_path) {
             (Some(cert_path), Some(key_path)) => {
                 let listen_addr = env::var("BIOME_TLS_LISTEN_ADDR")
-                    .unwrap_or_else(|_| "0.0.0.0:3443".to_string());
+                    .unwrap_or_else(|_| "0.0.0.0:3027".to_string());
                 let tls_port = resolve_port(&listen_addr, "BIOME_TLS_LISTEN_ADDR");
 
                 assert_ne!(

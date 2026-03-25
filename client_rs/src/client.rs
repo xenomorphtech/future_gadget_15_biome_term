@@ -14,7 +14,7 @@ pub struct BiomeTermClient {
 }
 
 impl BiomeTermClient {
-    /// Create a new client targeting `base_url` (e.g. `"http://localhost:3000"`).
+    /// Create a new client targeting `base_url` (e.g. `"http://localhost:3021"`).
     pub fn new(base_url: impl Into<String>) -> Self {
         Self {
             http: reqwest::Client::new(),
@@ -94,11 +94,7 @@ impl BiomeTermClient {
 
     /// Fetch event log entries.  Pass `after_seq` to only return events with
     /// `seq > after_seq` (use `0` or `None` for the full log).
-    pub async fn get_events(
-        &self,
-        id: &str,
-        after_seq: Option<u64>,
-    ) -> Result<Vec<Event>, Error> {
+    pub async fn get_events(&self, id: &str, after_seq: Option<u64>) -> Result<Vec<Event>, Error> {
         let url = match after_seq {
             Some(seq) => format!("{}/panes/{}/events?after={}", self.base_url, id, seq),
             None => format!("{}/panes/{}/events", self.base_url, id),
@@ -163,12 +159,10 @@ impl BiomeTermClient {
         let (ws, _) = tokio_tungstenite::connect_async(url).await?;
         let stream = ws.filter_map(|msg| async move {
             match msg {
-                Ok(Message::Text(txt)) => {
-                    match serde_json::from_str::<LifecycleEvent>(&txt) {
-                        Ok(event) => Some(Ok(event)),
-                        Err(e) => Some(Err(Error::Json(e))),
-                    }
-                }
+                Ok(Message::Text(txt)) => match serde_json::from_str::<LifecycleEvent>(&txt) {
+                    Ok(event) => Some(Ok(event)),
+                    Err(e) => Some(Err(Error::Json(e))),
+                },
                 Ok(Message::Close(_)) => None,
                 Ok(_) => None,
                 Err(e) => Some(Err(Error::WebSocket(e))),

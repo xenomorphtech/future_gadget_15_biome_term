@@ -63,7 +63,7 @@ impl App {
             .build()
             .unwrap();
         let (tx, rx) = std::sync::mpsc::sync_channel(512);
-        let server_url = "http://localhost:3000".to_string();
+        let server_url = "http://localhost:3021".to_string();
         let client = Arc::new(BiomeTermClient::new(&server_url));
         rt.spawn(lifecycle_task(client.clone(), tx.clone()));
         Self {
@@ -109,7 +109,13 @@ impl App {
             self.tx.clone(),
             ctx,
         ));
-        self.pane_states.insert(id.clone(), PaneState { parser, _task: handle });
+        self.pane_states.insert(
+            id.clone(),
+            PaneState {
+                parser,
+                _task: handle,
+            },
+        );
         self.selected_id = Some(id);
     }
 
@@ -119,7 +125,8 @@ impl App {
         self.pane_states.clear();
         self.panes.clear();
         self.selected_id = None;
-        self.rt.spawn(lifecycle_task(self.client.clone(), self.tx.clone()));
+        self.rt
+            .spawn(lifecycle_task(self.client.clone(), self.tx.clone()));
         self.status = format!("Connecting to {}…", self.server_url);
     }
 }
@@ -140,7 +147,12 @@ impl eframe::App for App {
                         out.extend_from_slice(t.as_bytes());
                         false
                     }
-                    egui::Event::Key { key, pressed: true, modifiers, .. } => {
+                    egui::Event::Key {
+                        key,
+                        pressed: true,
+                        modifiers,
+                        ..
+                    } => {
                         if let Some(b) = key_to_pty_bytes(key, modifiers) {
                             out.extend_from_slice(&b);
                             false
@@ -171,7 +183,8 @@ impl eframe::App for App {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
                 Msg::PanesUpdated(panes) => {
-                    self.pane_states.retain(|id, _| panes.iter().any(|p| &p.id == id));
+                    self.pane_states
+                        .retain(|id, _| panes.iter().any(|p| &p.id == id));
                     if let Some(ref sel) = self.selected_id {
                         if !panes.iter().any(|p| &p.id == sel) {
                             self.selected_id = None;
@@ -209,9 +222,7 @@ impl eframe::App for App {
                                 .desired_width(140.0)
                                 .hint_text("http://..."),
                         );
-                        if resp.lost_focus()
-                            && ctx.input(|i| i.key_pressed(egui::Key::Enter))
-                        {
+                        if resp.lost_focus() && ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
                             self.editing_url = false;
                             do_reconnect = true;
                         }
@@ -295,16 +306,26 @@ impl eframe::App for App {
                 ui.separator();
                 ui.horizontal(|ui| {
                     ui.label("Font");
-                    ui.add(
-                        egui::Slider::new(&mut self.font_size, 9.0..=24.0).suffix("px"),
-                    );
+                    ui.add(egui::Slider::new(&mut self.font_size, 9.0..=24.0).suffix("px"));
                 });
 
                 ui.separator();
-                ui.label(egui::RichText::new("Resize").small().color(egui::Color32::GRAY));
+                ui.label(
+                    egui::RichText::new("Resize")
+                        .small()
+                        .color(egui::Color32::GRAY),
+                );
                 ui.horizontal(|ui| {
-                    ui.add(egui::DragValue::new(&mut self.resize_cols).range(10..=500).prefix("cols "));
-                    ui.add(egui::DragValue::new(&mut self.resize_rows).range(4..=200).prefix("rows "));
+                    ui.add(
+                        egui::DragValue::new(&mut self.resize_cols)
+                            .range(10..=500)
+                            .prefix("cols "),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.resize_rows)
+                            .range(4..=200)
+                            .prefix("rows "),
+                    );
                 });
                 if ui.button("↔ Send resize").clicked() {
                     to_resize = Some((self.resize_cols, self.resize_rows));
@@ -362,26 +383,32 @@ impl eframe::App for App {
         egui::TopBottomPanel::bottom("input_panel").show(ctx, |ui| {
             if self.terminal_focused {
                 // Show mode indicator; clicking here returns to typed-input mode.
-                let resp = ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("⌨ DIRECT INPUT")
-                            .color(egui::Color32::from_rgb(100, 220, 100))
-                            .small(),
-                    );
-                    ui.label(
-                        egui::RichText::new("(click here for typed input)")
-                            .color(egui::Color32::GRAY)
-                            .small(),
-                    )
-                }).response;
+                let resp = ui
+                    .horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new("⌨ DIRECT INPUT")
+                                .color(egui::Color32::from_rgb(100, 220, 100))
+                                .small(),
+                        );
+                        ui.label(
+                            egui::RichText::new("(click here for typed input)")
+                                .color(egui::Color32::GRAY)
+                                .small(),
+                        )
+                    })
+                    .response;
                 if resp.clicked() {
                     input_bar_clicked = true;
                 }
                 // Also detect a plain click anywhere in the bar
                 let bar_rect = ui.max_rect();
-                if ctx.input(|i| i.pointer.primary_clicked()
-                    && i.pointer.interact_pos().map(|p| bar_rect.contains(p)).unwrap_or(false))
-                {
+                if ctx.input(|i| {
+                    i.pointer.primary_clicked()
+                        && i.pointer
+                            .interact_pos()
+                            .map(|p| bar_rect.contains(p))
+                            .unwrap_or(false)
+                }) {
                     input_bar_clicked = true;
                 }
             } else {
@@ -397,7 +424,7 @@ impl eframe::App for App {
                     .inner;
 
                 if resp.has_focus() {
-                    let up   = ctx.input(|i| i.key_pressed(egui::Key::ArrowUp));
+                    let up = ctx.input(|i| i.key_pressed(egui::Key::ArrowUp));
                     let down = ctx.input(|i| i.key_pressed(egui::Key::ArrowDown));
 
                     if up && !self.history.is_empty() {
@@ -405,21 +432,21 @@ impl eframe::App for App {
                             self.history_draft = self.input.clone();
                             self.history_pos = Some(self.history.len() - 1);
                         } else if let Some(p) = self.history_pos {
-                            if p > 0 { self.history_pos = Some(p - 1); }
+                            if p > 0 {
+                                self.history_pos = Some(p - 1);
+                            }
                         }
                         if let Some(p) = self.history_pos {
                             self.input = self.history[p].clone();
                         }
                         // Move cursor to end of the restored entry.
                         let te_id = resp.id;
-                        if let Some(mut state) =
-                            egui::TextEdit::load_state(ctx, te_id)
-                        {
-                            state.cursor.set_char_range(Some(
-                                egui::text::CCursorRange::one(
+                        if let Some(mut state) = egui::TextEdit::load_state(ctx, te_id) {
+                            state
+                                .cursor
+                                .set_char_range(Some(egui::text::CCursorRange::one(
                                     egui::text::CCursor::new(self.input.chars().count()),
-                                ),
-                            ));
+                                )));
                             state.store(ctx, te_id);
                         }
                     }
@@ -437,14 +464,12 @@ impl eframe::App for App {
                             }
                         }
                         let te_id = resp.id;
-                        if let Some(mut state) =
-                            egui::TextEdit::load_state(ctx, te_id)
-                        {
-                            state.cursor.set_char_range(Some(
-                                egui::text::CCursorRange::one(
+                        if let Some(mut state) = egui::TextEdit::load_state(ctx, te_id) {
+                            state
+                                .cursor
+                                .set_char_range(Some(egui::text::CCursorRange::one(
                                     egui::text::CCursor::new(self.input.chars().count()),
-                                ),
-                            ));
+                                )));
                             state.store(ctx, te_id);
                         }
                     }
@@ -503,12 +528,7 @@ impl eframe::App for App {
             if let Some(ref id) = self.selected_id.clone() {
                 if let Some(state) = self.pane_states.get(id) {
                     if let Ok(parser) = state.parser.lock() {
-                        render_terminal(
-                            ui,
-                            &parser,
-                            self.font_size,
-                            self.terminal_focused,
-                        );
+                        render_terminal(ui, &parser, self.font_size, self.terminal_focused);
                     }
                 }
             } else {
@@ -610,8 +630,7 @@ fn render_terminal(ui: &mut egui::Ui, parser: &vt100::Parser, font_size: f32, fo
                     // width-clamping behaviour.
                     let galley = ui.fonts(|f| f.layout_job(job));
                     let size = galley.size();
-                    let (rect, _) =
-                        ui.allocate_exact_size(size, egui::Sense::hover());
+                    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
                     if ui.is_rect_visible(rect) {
                         ui.painter().galley(rect.min, galley, FG);
                     }
@@ -670,15 +689,32 @@ fn key_to_pty_bytes(key: &egui::Key, modifiers: &egui::Modifiers) -> Option<Vec<
     // Ctrl+letter → control codes (only when Ctrl alone, no Alt)
     if modifiers.ctrl && !modifiers.alt {
         let byte: u8 = match key {
-            egui::Key::A => 1,  egui::Key::B => 2,  egui::Key::C => 3,
-            egui::Key::D => 4,  egui::Key::E => 5,  egui::Key::F => 6,
-            egui::Key::G => 7,  egui::Key::H => 8,  egui::Key::I => 9,
-            egui::Key::J => 10, egui::Key::K => 11, egui::Key::L => 12,
-            egui::Key::M => 13, egui::Key::N => 14, egui::Key::O => 15,
-            egui::Key::P => 16, egui::Key::Q => 17, egui::Key::R => 18,
-            egui::Key::S => 19, egui::Key::T => 20, egui::Key::U => 21,
-            egui::Key::V => 22, egui::Key::W => 23, egui::Key::X => 24,
-            egui::Key::Y => 25, egui::Key::Z => 26,
+            egui::Key::A => 1,
+            egui::Key::B => 2,
+            egui::Key::C => 3,
+            egui::Key::D => 4,
+            egui::Key::E => 5,
+            egui::Key::F => 6,
+            egui::Key::G => 7,
+            egui::Key::H => 8,
+            egui::Key::I => 9,
+            egui::Key::J => 10,
+            egui::Key::K => 11,
+            egui::Key::L => 12,
+            egui::Key::M => 13,
+            egui::Key::N => 14,
+            egui::Key::O => 15,
+            egui::Key::P => 16,
+            egui::Key::Q => 17,
+            egui::Key::R => 18,
+            egui::Key::S => 19,
+            egui::Key::T => 20,
+            egui::Key::U => 21,
+            egui::Key::V => 22,
+            egui::Key::W => 23,
+            egui::Key::X => 24,
+            egui::Key::Y => 25,
+            egui::Key::Z => 26,
             _ => return None,
         };
         return Some(vec![byte]);
@@ -690,32 +726,32 @@ fn key_to_pty_bytes(key: &egui::Key, modifiers: &egui::Modifiers) -> Option<Vec<
     }
 
     let bytes: &[u8] = match key {
-        egui::Key::Enter     => b"\r",
+        egui::Key::Enter => b"\r",
         egui::Key::Backspace => b"\x7f",
-        egui::Key::Delete    => b"\x1b[3~",
-        egui::Key::Escape    => b"\x1b",
-        egui::Key::Tab       => b"\t",
-        egui::Key::ArrowUp   => b"\x1b[A",
+        egui::Key::Delete => b"\x1b[3~",
+        egui::Key::Escape => b"\x1b",
+        egui::Key::Tab => b"\t",
+        egui::Key::ArrowUp => b"\x1b[A",
         egui::Key::ArrowDown => b"\x1b[B",
-        egui::Key::ArrowRight=> b"\x1b[C",
+        egui::Key::ArrowRight => b"\x1b[C",
         egui::Key::ArrowLeft => b"\x1b[D",
-        egui::Key::Home      => b"\x1b[H",
-        egui::Key::End       => b"\x1b[F",
-        egui::Key::PageUp    => b"\x1b[5~",
-        egui::Key::PageDown  => b"\x1b[6~",
-        egui::Key::Insert    => b"\x1b[2~",
-        egui::Key::F1        => b"\x1bOP",
-        egui::Key::F2        => b"\x1bOQ",
-        egui::Key::F3        => b"\x1bOR",
-        egui::Key::F4        => b"\x1bOS",
-        egui::Key::F5        => b"\x1b[15~",
-        egui::Key::F6        => b"\x1b[17~",
-        egui::Key::F7        => b"\x1b[18~",
-        egui::Key::F8        => b"\x1b[19~",
-        egui::Key::F9        => b"\x1b[20~",
-        egui::Key::F10       => b"\x1b[21~",
-        egui::Key::F11       => b"\x1b[23~",
-        egui::Key::F12       => b"\x1b[24~",
+        egui::Key::Home => b"\x1b[H",
+        egui::Key::End => b"\x1b[F",
+        egui::Key::PageUp => b"\x1b[5~",
+        egui::Key::PageDown => b"\x1b[6~",
+        egui::Key::Insert => b"\x1b[2~",
+        egui::Key::F1 => b"\x1bOP",
+        egui::Key::F2 => b"\x1bOQ",
+        egui::Key::F3 => b"\x1bOR",
+        egui::Key::F4 => b"\x1bOS",
+        egui::Key::F5 => b"\x1b[15~",
+        egui::Key::F6 => b"\x1b[17~",
+        egui::Key::F7 => b"\x1b[18~",
+        egui::Key::F8 => b"\x1b[19~",
+        egui::Key::F9 => b"\x1b[20~",
+        egui::Key::F10 => b"\x1b[21~",
+        egui::Key::F11 => b"\x1b[23~",
+        egui::Key::F12 => b"\x1b[24~",
         _ => return None,
     };
     Some(bytes.to_vec())
@@ -723,10 +759,7 @@ fn key_to_pty_bytes(key: &egui::Key, modifiers: &egui::Modifiers) -> Option<Vec<
 
 // ── Background tasks ──────────────────────────────────────────────────────────
 
-async fn lifecycle_task(
-    client: Arc<BiomeTermClient>,
-    tx: std::sync::mpsc::SyncSender<Msg>,
-) {
+async fn lifecycle_task(client: Arc<BiomeTermClient>, tx: std::sync::mpsc::SyncSender<Msg>) {
     if let Ok(panes) = client.list_panes().await {
         let _ = tx.send(Msg::PanesUpdated(panes));
     }

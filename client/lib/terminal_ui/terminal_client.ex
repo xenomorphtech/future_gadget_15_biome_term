@@ -1,5 +1,5 @@
 defmodule TerminalUi.TerminalClient do
-  @default_base "http://localhost:3000"
+  @default_base "http://localhost:3021"
   @base_url_env :terminal_server_url
   @legacy_base_url_env :terminal_server_http_url
   @api_key_env :terminal_server_api_key
