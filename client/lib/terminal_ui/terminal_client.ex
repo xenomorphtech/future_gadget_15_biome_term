@@ -19,7 +19,13 @@ defmodule TerminalUi.TerminalClient do
   end
 
   def get_screen(id) do
-    {:ok, Req.get!(base_url() <> "/panes/#{id}/screen", req_options()).body}
+    response = Req.get!(base_url() <> "/panes/#{id}/screen", req_options())
+
+    if response.status == 200 do
+      {:ok, response.body}
+    else
+      {:error, response.body}
+    end
   end
 
   def get_pane(id) do
