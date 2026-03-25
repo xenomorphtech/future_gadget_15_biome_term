@@ -47,7 +47,14 @@ export const SnippetInput = {
 
       if (e.key === "Enter" && e.ctrlKey) {
         e.preventDefault();
-        this.el.requestSubmit();
+        const value = textarea.value;
+        if (value.trim() !== "") {
+          this.pushEvent("inject_snippet", { snippet: value });
+          this.saveHistoryEntry(value);
+          this.resetNavigation();
+          textarea.value = "";
+          textarea.dispatchEvent(new Event("input", { bubbles: true }));
+        }
         return;
       }
 

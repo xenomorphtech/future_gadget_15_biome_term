@@ -8,6 +8,7 @@ defmodule TerminalUi.PaneSocket do
     WebSockex.start_link(conn, __MODULE__, %{pane_id: pane_id},
       name: name,
       handle_initial_conn_failure: true,
+      # Don't block the caller while the pane stream connects.
       async: true
     )
   end

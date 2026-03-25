@@ -19,21 +19,37 @@ defmodule TerminalUi.TerminalClient do
   end
 
   def get_screen(id) do
-    response = Req.get!(base_url() <> "/panes/#{id}/screen", req_options())
+    case Req.get(base_url() <> "/panes/#{id}/screen", req_options()) do
+      {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
+        {:ok, body}
 
-    if response.status == 200 do
-      {:ok, response.body}
-    else
-      {:error, response.body}
+      {:ok, %Req.Response{status: 404}} ->
+        {:error, :not_found}
+
+      {:ok, %Req.Response{status: status}} ->
+        {:error, {:http_error, status}}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
   def get_pane(id) do
-    panes = Req.get!(base_url() <> "/panes", req_options()).body
+    case Req.get(base_url() <> "/panes", req_options()) do
+      {:ok, %Req.Response{status: status, body: panes}} when status in 200..299 ->
+        case Enum.find(panes, &(&1["id"] == id)) do
+          nil -> {:error, :not_found}
+          pane -> {:ok, pane}
+        end
 
-    case Enum.find(panes, &(&1["id"] == id)) do
-      nil -> {:error, :not_found}
-      pane -> {:ok, pane}
+      {:ok, %Req.Response{status: 404}} ->
+        {:error, :not_found}
+
+      {:ok, %Req.Response{status: status}} ->
+        {:error, {:http_error, status}}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
