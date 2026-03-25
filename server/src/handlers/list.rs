@@ -1,4 +1,4 @@
-use crate::{pane::Pane, state::AppState};
+use crate::{event::now_ms, pane::Pane, state::AppState};
 use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::Ordering;
@@ -16,16 +16,22 @@ pub struct PaneInfo {
     pub rows: u16,
     /// True when the shell process has exited
     pub terminated: bool,
+    /// Seconds since the last PTY output from this pane
+    pub idle_seconds: u64,
 }
 
 impl PaneInfo {
     pub fn from_pane(pane: &Pane) -> Self {
+        let last = pane.last_activity_ms.load(Ordering::Relaxed);
+        let now = now_ms();
+        let idle_ms = now.saturating_sub(last);
         PaneInfo {
             id: pane.id,
             name: pane.name.clone(),
             cols: pane.cols,
             rows: pane.rows,
             terminated: pane.terminated.load(Ordering::Relaxed),
+            idle_seconds: idle_ms / 1000,
         }
     }
 }

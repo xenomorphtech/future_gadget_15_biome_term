@@ -1,7 +1,7 @@
 use crate::event::{now_ms, Event, EventLog};
 use portable_pty::{Child, CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem};
 use std::io::{Read, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, RwLock};
 use uuid::Uuid;
@@ -23,6 +23,8 @@ pub struct Pane {
     pub rows: u16,
     /// Set to true when the PTY read loop exits (shell exited or was killed).
     pub terminated: Arc<AtomicBool>,
+    /// Epoch millis of the last PTY output. Updated every time data arrives from the shell.
+    pub last_activity_ms: Arc<AtomicU64>,
 }
 
 pub fn create_pane(
@@ -74,6 +76,7 @@ pub fn create_pane(
     let master = Arc::new(tokio::sync::Mutex::new(pair.master));
     let writer = Arc::new(tokio::sync::Mutex::new(writer));
 
+    let last_activity_ms = Arc::new(AtomicU64::new(now_ms()));
     let pane = Arc::new(Pane {
         id,
         name,
@@ -87,6 +90,7 @@ pub fn create_pane(
         cols,
         rows,
         terminated: terminated.clone(),
+        last_activity_ms: last_activity_ms.clone(),
     });
 
     let child_arc = Arc::clone(&pane.child);
@@ -97,6 +101,7 @@ pub fn create_pane(
         broadcast_tx,
         terminated,
         child_arc,
+        last_activity_ms,
     );
 
     Ok(pane)
@@ -109,6 +114,7 @@ fn spawn_pty_read_loop(
     tx: broadcast::Sender<Arc<Event>>,
     terminated: Arc<AtomicBool>,
     child: Arc<Mutex<Option<Box<dyn Child + Send + Sync>>>>,
+    last_activity_ms: Arc<AtomicU64>,
 ) {
     tokio::task::spawn_blocking(move || {
         let mut buf = [0u8; 4096];
@@ -117,6 +123,7 @@ fn spawn_pty_read_loop(
                 Ok(0) => break,
                 Ok(n) => {
                     let data = buf[..n].to_vec();
+                    last_activity_ms.store(now_ms(), Ordering::Relaxed);
                     {
                         parser.blocking_write().process(&data);
                     }
