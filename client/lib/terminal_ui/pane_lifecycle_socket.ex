@@ -3,7 +3,7 @@ defmodule TerminalUi.PaneLifecycleSocket do
 
   def start_link(_opts) do
     WebSockex.start_link(
-      TerminalUi.TerminalClient.ws_url("/panes/lifecycle"),
+      TerminalUi.TerminalClient.ws_conn("/panes/lifecycle"),
       __MODULE__,
       %{},
       name: __MODULE__,

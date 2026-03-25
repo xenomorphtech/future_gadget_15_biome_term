@@ -2,10 +2,10 @@ defmodule TerminalUi.PaneSocket do
   use WebSockex
 
   def start_link(pane_id) do
-    url = TerminalUi.TerminalClient.ws_url("/panes/#{pane_id}/stream")
+    conn = TerminalUi.TerminalClient.ws_conn("/panes/#{pane_id}/stream")
     name = {:via, Registry, {TerminalUi.PaneRegistry, pane_id}}
 
-    WebSockex.start_link(url, __MODULE__, %{pane_id: pane_id},
+    WebSockex.start_link(conn, __MODULE__, %{pane_id: pane_id},
       name: name,
       handle_initial_conn_failure: true,
       async: false

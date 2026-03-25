@@ -83,6 +83,9 @@ cd gui_client_rs && cargo run
 cd client && mix phx.server   # → http://localhost:4000
 ```
 
+For the default local-only server wiring, the Rust backend listens on
+`127.0.0.1:3000` and the Phoenix client talks to `http://localhost:3000`.
+
 ## Project Layout
 
 ```
@@ -102,7 +105,44 @@ biome_term/
 
 ## API
 
-The Rust server exposes a REST + WebSocket API on **port 3000**.
+The Rust server always exposes local HTTP + WebSocket access on `127.0.0.1:3000`
+by default. If `BIOME_TLS_CERT` and `BIOME_TLS_KEY` are set, it also exposes
+HTTPS/WSS on `BIOME_TLS_LISTEN_ADDR` (default `0.0.0.0:3443`), which must use
+a different port than the local HTTP listener.
+
+## Runtime Configuration
+
+### Server
+
+- `LISTEN_ADDR`: chooses the HTTP port, but the host is always forced to `127.0.0.1`. For example, `LISTEN_ADDR=0.0.0.0:3100` still binds HTTP to `127.0.0.1:3100`.
+- `BIOME_API_KEY`: if set, all HTTP and WebSocket endpoints require either `Authorization: Bearer <key>` or `X-API-Key: <key>`. If unset, the server stays open for backwards compatibility.
+- `BIOME_TLS_CERT` and `BIOME_TLS_KEY`: enable HTTPS/WSS when both are set to certificate and private-key files.
+- `BIOME_TLS_LISTEN_ADDR`: HTTPS bind address, default `0.0.0.0:3443`. This port must differ from the HTTP port.
+
+### Client
+
+- `BIOME_URL`: base URL for the Rust server. Use `http://localhost:3000` for local HTTP or something like `https://host.example:3443` when TLS is enabled.
+- `BIOME_API_KEY`: API key sent by the Elixir client for both `Req` requests and websocket handshakes.
+
+### Example
+
+```bash
+# Local HTTP only, bound to localhost
+cd server
+cargo run
+
+# HTTPS enabled on a separate port, while HTTP stays on localhost
+LISTEN_ADDR=127.0.0.1:3000 \
+BIOME_TLS_CERT=/path/to/server.crt \
+BIOME_TLS_KEY=/path/to/server.key \
+BIOME_TLS_LISTEN_ADDR=0.0.0.0:3443 \
+BIOME_API_KEY=changeme \
+cargo run
+
+# Phoenix client pointed at the HTTPS listener
+cd ../client
+BIOME_URL=https://localhost:3443 BIOME_API_KEY=changeme mix phx.server
+```
 
 See **[docs/api.md](docs/api.md)** for the full reference (also live at `GET /openapi.json`).
 

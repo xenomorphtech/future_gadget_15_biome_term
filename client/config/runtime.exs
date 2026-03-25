@@ -20,6 +20,10 @@ if System.get_env("PHX_SERVER") do
   config :terminal_ui, TerminalUiWeb.Endpoint, server: true
 end
 
+config :terminal_ui,
+  terminal_server_url: System.get_env("BIOME_URL"),
+  terminal_server_api_key: System.get_env("BIOME_API_KEY")
+
 if config_env() == :prod do
   auth_password_file =
     System.get_env("AUTH_PASSWORD_FILE") ||

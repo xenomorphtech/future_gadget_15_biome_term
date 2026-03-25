@@ -1,12 +1,21 @@
+use axum::http::{
+    header::{HeaderValue, AUTHORIZATION},
+    StatusCode,
+};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::time::sleep;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 async fn start_test_server() -> String {
+    start_test_server_with_api_key(None).await
+}
+
+async fn start_test_server_with_api_key(api_key: Option<&str>) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    let state = terminal_server::state::AppState::new();
+    let state = terminal_server::state::AppState::with_api_key(api_key.map(str::to_string));
     let router = terminal_server::build_router(state);
     tokio::spawn(async move {
         axum::serve(listener, router).await.unwrap();
@@ -53,6 +62,81 @@ async fn delete_pane(client: &reqwest::Client, base: &str, id: &str) {
         .send()
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn test_http_auth_is_optional_when_no_api_key_is_configured() {
+    let base = start_test_server().await;
+    let response = reqwest::Client::new()
+        .get(format!("{base}/panes"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_http_auth_accepts_bearer_and_x_api_key() {
+    let base = start_test_server_with_api_key(Some("secret-token")).await;
+    let client = reqwest::Client::new();
+
+    let unauthorized = client.get(format!("{base}/panes")).send().await.unwrap();
+    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+    let wrong = client
+        .get(format!("{base}/panes"))
+        .header("x-api-key", "wrong-token")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(wrong.status(), StatusCode::UNAUTHORIZED);
+
+    let bearer = client
+        .get(format!("{base}/panes"))
+        .bearer_auth("secret-token")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bearer.status(), StatusCode::OK);
+
+    let x_api_key = client
+        .get(format!("{base}/panes"))
+        .header("x-api-key", "secret-token")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(x_api_key.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_websocket_auth_requires_api_key_when_configured() {
+    use tokio_tungstenite::connect_async;
+
+    let base = start_test_server_with_api_key(Some("socket-secret")).await;
+    let ws_base = base.replace("http://", "ws://");
+
+    let error = connect_async(format!("{ws_base}/panes/lifecycle"))
+        .await
+        .expect_err("unauthenticated websocket connection should fail");
+    let response = match error {
+        tokio_tungstenite::tungstenite::Error::Http(response) => response,
+        other => panic!("expected websocket HTTP error, got {other:?}"),
+    };
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let mut request = format!("{ws_base}/panes/lifecycle")
+        .into_client_request()
+        .unwrap();
+    request.headers_mut().insert(
+        AUTHORIZATION,
+        HeaderValue::from_static("Bearer socket-secret"),
+    );
+
+    let (mut ws, _) = connect_async(request).await.unwrap();
+    let snapshot = recv_lifecycle_event(&mut ws).await;
+    assert_eq!(snapshot["type"].as_str(), Some("snapshot"));
+    ws.close(None).await.ok();
 }
 
 async fn recv_lifecycle_event(
