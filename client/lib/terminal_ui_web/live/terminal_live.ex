@@ -197,8 +197,8 @@ defmodule TerminalUiWeb.TerminalLive do
     removed_ids = MapSet.difference(current_ids, next_ids) |> MapSet.to_list()
 
     Enum.each(added_panes, fn pane ->
-      PaneSupervisor.ensure_started(pane["id"])
       subscribe_to_pane_updates(pane["id"])
+      Task.start(fn -> PaneSupervisor.ensure_started(pane["id"]) end)
     end)
 
     Enum.each(removed_ids, fn pane_id ->
@@ -276,8 +276,8 @@ defmodule TerminalUiWeb.TerminalLive do
 
         assign(socket, :panes, panes)
       else
-        PaneSupervisor.ensure_started(pane_id)
         subscribe_to_pane_updates(pane_id)
+        Task.start(fn -> PaneSupervisor.ensure_started(pane_id) end)
 
         socket
         |> assign(:panes, socket.assigns.panes ++ [pane])
