@@ -23,7 +23,7 @@ pub struct Pane {
     pub rows: u16,
     /// Set to true when the PTY read loop exits (shell exited or was killed).
     pub terminated: Arc<AtomicBool>,
-    /// Epoch millis of the last PTY output. Updated every time data arrives from the shell.
+    /// Epoch millis of the last pane activity. Updated on input writes and PTY output.
     pub last_activity_ms: Arc<AtomicU64>,
 }
 

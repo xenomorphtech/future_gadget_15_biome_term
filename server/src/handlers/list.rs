@@ -16,7 +16,7 @@ pub struct PaneInfo {
     pub rows: u16,
     /// True when the shell process has exited
     pub terminated: bool,
-    /// Seconds since the last PTY output from this pane
+    /// Seconds since the last pane activity (input or PTY output)
     pub idle_seconds: u64,
 }
 

@@ -82,6 +82,17 @@ async fn delete_pane(client: &reqwest::Client, base: &str, id: &str) {
         .unwrap();
 }
 
+async fn list_panes(client: &reqwest::Client, base: &str) -> serde_json::Value {
+    client
+        .get(format!("{base}/panes"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap()
+}
+
 #[tokio::test]
 async fn test_http_auth_is_optional_when_no_api_key_is_configured() {
     let base = start_test_server().await;
@@ -309,14 +320,7 @@ async fn test_list_and_delete() {
 
     let id = create_pane(&client, &base).await;
 
-    let list: serde_json::Value = client
-        .get(format!("{base}/panes"))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+    let list = list_panes(&client, &base).await;
 
     let arr = list.as_array().unwrap();
     assert!(
@@ -326,20 +330,61 @@ async fn test_list_and_delete() {
 
     delete_pane(&client, &base, &id).await;
 
-    let list2: serde_json::Value = client
-        .get(format!("{base}/panes"))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+    let list2 = list_panes(&client, &base).await;
 
     let arr2 = list2.as_array().unwrap();
     assert!(
         !arr2.iter().any(|p| p["id"].as_str() == Some(&id)),
         "Deleted pane should not appear in list"
     );
+}
+
+#[tokio::test]
+async fn test_list_reports_idle_seconds_and_resets_on_input() {
+    let base = start_test_server().await;
+    let client = reqwest::Client::new();
+
+    let id = create_pane(&client, &base).await;
+    sleep(Duration::from_millis(300)).await;
+
+    send_input(&client, &base, &id, "stty -echo\n").await;
+    sleep(Duration::from_millis(500)).await;
+    sleep(Duration::from_millis(1100)).await;
+
+    let list_before_input = list_panes(&client, &base).await;
+    let pane_before_input = list_before_input
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|pane| pane["id"].as_str() == Some(id.as_str()))
+        .expect("pane should appear in list before input");
+    let idle_before_input = pane_before_input["idle_seconds"]
+        .as_u64()
+        .expect("idle_seconds should be returned as an integer");
+    assert!(
+        idle_before_input >= 1,
+        "idle_seconds should increase while pane is idle, got {idle_before_input}"
+    );
+
+    send_input(&client, &base, &id, "x").await;
+    sleep(Duration::from_millis(100)).await;
+
+    let list_after_input = list_panes(&client, &base).await;
+    let pane_after_input = list_after_input
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|pane| pane["id"].as_str() == Some(id.as_str()))
+        .expect("pane should appear in list after input");
+    let idle_after_input = pane_after_input["idle_seconds"]
+        .as_u64()
+        .expect("idle_seconds should be returned as an integer");
+    assert_eq!(
+        idle_after_input, 0,
+        "idle_seconds should reset immediately after input activity, got {idle_after_input}"
+    );
+
+    delete_pane(&client, &base, &id).await;
 }
 
 #[tokio::test]

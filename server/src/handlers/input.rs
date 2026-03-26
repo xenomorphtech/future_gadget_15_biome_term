@@ -1,4 +1,4 @@
-use crate::{error::AppError, state::AppState};
+use crate::{error::AppError, event::now_ms, state::AppState};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -7,6 +7,7 @@ use axum::{
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::Deserialize;
 use std::io::Write;
+use std::sync::atomic::Ordering;
 use utoipa::ToSchema;
 
 /// Input to write to a pane's PTY stdin.
@@ -48,6 +49,7 @@ pub async fn send_input_handler(
     writer
         .write_all(&bytes)
         .map_err(|e| AppError::Internal(format!("write failed: {e}")))?;
+    pane.last_activity_ms.store(now_ms(), Ordering::Relaxed);
 
     Ok(StatusCode::NO_CONTENT)
 }
