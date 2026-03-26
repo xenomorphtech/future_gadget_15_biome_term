@@ -36,21 +36,9 @@ defmodule TerminalUi.PaneSocket do
   def handle_disconnect(_conn_status, state) do
     case TerminalUi.TerminalClient.get_pane(state.pane_id) do
       {:ok, %{"terminated" => true}} ->
-        Phoenix.PubSub.broadcast(
-          TerminalUi.PubSub,
-          "panes",
-          {:pane_terminated, state.pane_id}
-        )
-
         {:ok, state}
 
       {:error, :not_found} ->
-        Phoenix.PubSub.broadcast(
-          TerminalUi.PubSub,
-          "panes",
-          {:pane_deleted, state.pane_id}
-        )
-
         {:ok, state}
 
       _ ->

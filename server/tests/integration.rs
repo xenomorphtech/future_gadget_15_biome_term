@@ -24,16 +24,34 @@ async fn start_test_server_with_api_key(api_key: Option<&str>) -> String {
 }
 
 async fn create_pane(client: &reqwest::Client, base: &str) -> String {
-    let resp: serde_json::Value = client
+    let resp = create_pane_response(client, base, None).await;
+    resp["id"].as_str().unwrap().to_string()
+}
+
+async fn create_pane_with_name(client: &reqwest::Client, base: &str, name: &str) -> String {
+    let resp = create_pane_response(client, base, Some(name)).await;
+    resp["id"].as_str().unwrap().to_string()
+}
+
+async fn create_pane_response(
+    client: &reqwest::Client,
+    base: &str,
+    name: Option<&str>,
+) -> serde_json::Value {
+    let mut body = serde_json::json!({ "cols": 80, "rows": 24 });
+    if let Some(name) = name {
+        body["name"] = serde_json::Value::String(name.to_string());
+    }
+
+    client
         .post(format!("{base}/panes"))
-        .json(&serde_json::json!({ "cols": 80, "rows": 24 }))
+        .json(&body)
         .send()
         .await
         .unwrap()
         .json()
         .await
-        .unwrap();
-    resp["id"].as_str().unwrap().to_string()
+        .unwrap()
 }
 
 async fn send_input(client: &reqwest::Client, base: &str, id: &str, text: &str) {
@@ -412,6 +430,165 @@ async fn test_pane_name() {
     );
 
     delete_pane(&client, &base, &id).await;
+}
+
+#[tokio::test]
+async fn test_named_pane_routes_accept_name() {
+    let base = start_test_server().await;
+    let client = reqwest::Client::new();
+    let pane_name = "named-route";
+
+    let id = create_pane_with_name(&client, &base, pane_name).await;
+    sleep(Duration::from_millis(300)).await;
+
+    let input_response = client
+        .post(format!("{base}/panes/{pane_name}/input"))
+        .json(&serde_json::json!({ "data": STANDARD.encode("echo via_name\n".as_bytes()) }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(input_response.status(), StatusCode::NO_CONTENT);
+
+    sleep(Duration::from_millis(500)).await;
+
+    let events: serde_json::Value = client
+        .get(format!("{base}/panes/{pane_name}/events?after=0"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let event_output = String::from_utf8_lossy(
+        &events
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|event| {
+                STANDARD
+                    .decode(event["data"].as_str().unwrap_or_default())
+                    .unwrap_or_default()
+            })
+            .collect::<Vec<_>>(),
+    )
+    .to_string();
+    assert!(
+        event_output.contains("via_name"),
+        "expected name-routed events to include pane output, got: {event_output:?}"
+    );
+
+    let screen: serde_json::Value = client
+        .get(format!("{base}/panes/{pane_name}/screen"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let screen_content = screen["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|row| row.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        screen_content.contains("via_name"),
+        "expected name-routed screen to include pane output, got:\n{screen_content}"
+    );
+
+    let delete_response = client
+        .delete(format!("{base}/panes/{pane_name}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(delete_response.status(), StatusCode::NO_CONTENT);
+
+    let list: serde_json::Value = client
+        .get(format!("{base}/panes"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        !list
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|pane| pane["id"].as_str() == Some(id.as_str())),
+        "deleted pane should be gone after name-routed delete"
+    );
+}
+
+#[tokio::test]
+async fn test_named_pane_routes_accept_uuid_shaped_name() {
+    let base = start_test_server().await;
+    let client = reqwest::Client::new();
+    let pane_name = "123e4567-e89b-12d3-a456-426614174000";
+
+    create_pane_with_name(&client, &base, pane_name).await;
+    sleep(Duration::from_millis(300)).await;
+
+    let input_response = client
+        .post(format!("{base}/panes/{pane_name}/input"))
+        .json(&serde_json::json!({ "data": STANDARD.encode("echo uuid_name\n".as_bytes()) }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(input_response.status(), StatusCode::NO_CONTENT);
+
+    sleep(Duration::from_millis(500)).await;
+
+    let screen: serde_json::Value = client
+        .get(format!("{base}/panes/{pane_name}/screen"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let screen_content = screen["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|row| row.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        screen_content.contains("uuid_name"),
+        "expected UUID-shaped pane name to resolve via name routing, got:\n{screen_content}"
+    );
+
+    delete_pane(&client, &base, pane_name).await;
+}
+
+#[tokio::test]
+async fn test_named_pane_routes_error_on_duplicate_names() {
+    let base = start_test_server().await;
+    let client = reqwest::Client::new();
+    let pane_name = "duplicate-name";
+
+    let first_id = create_pane_with_name(&client, &base, pane_name).await;
+    let second_id = create_pane_with_name(&client, &base, pane_name).await;
+
+    let response = client
+        .get(format!("{base}/panes/{pane_name}/screen"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(
+        body["error"].as_str(),
+        Some("multiple panes named duplicate-name found")
+    );
+
+    delete_pane(&client, &base, &first_id).await;
+    delete_pane(&client, &base, &second_id).await;
 }
 
 #[tokio::test]

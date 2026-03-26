@@ -3,7 +3,6 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
-use uuid::Uuid;
 
 /// Kill and remove a pane.
 ///
@@ -13,21 +12,19 @@ use uuid::Uuid;
     delete,
     path = "/panes/{id}",
     params(
-        ("id" = Uuid, Path, description = "Pane ID"),
+        ("id" = String, Path, description = "Pane ID or unique pane name"),
     ),
     responses(
         (status = 204, description = "Pane killed and removed"),
+        (status = 400, description = "Pane name is ambiguous"),
         (status = 404, description = "Pane not found"),
     )
 )]
 pub async fn delete_pane_handler(
-    Path(id): Path<Uuid>,
+    Path(id): Path<String>,
     State(state): State<AppState>,
 ) -> Result<StatusCode, AppError> {
-    let (_, pane) = state
-        .panes
-        .remove(&id)
-        .ok_or_else(|| AppError::NotFound(format!("pane {id} not found")))?;
+    let (id, pane) = state.remove_pane(&id)?;
 
     let _ = state
         .pane_lifecycle_tx

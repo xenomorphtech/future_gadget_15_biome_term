@@ -5,7 +5,6 @@ use axum::{
 };
 use serde::Serialize;
 use utoipa::ToSchema;
-use uuid::Uuid;
 
 /// Authoritative VT100 screen state of a pane.
 #[derive(Serialize, ToSchema)]
@@ -29,22 +28,19 @@ pub struct ScreenResponse {
     get,
     path = "/panes/{id}/screen",
     params(
-        ("id" = Uuid, Path, description = "Pane ID"),
+        ("id" = String, Path, description = "Pane ID or unique pane name"),
     ),
     responses(
         (status = 200, description = "Current screen state", body = ScreenResponse),
+        (status = 400, description = "Pane name is ambiguous"),
         (status = 404, description = "Pane not found"),
     )
 )]
 pub async fn get_screen_handler(
-    Path(id): Path<Uuid>,
+    Path(id): Path<String>,
     State(state): State<AppState>,
 ) -> Result<Json<ScreenResponse>, AppError> {
-    let pane = state
-        .panes
-        .get(&id)
-        .map(|r| r.clone())
-        .ok_or_else(|| AppError::NotFound(format!("pane {id} not found")))?;
+    let pane = state.get_pane(&id)?;
 
     let parser = pane.parser.read().await;
     let screen = parser.screen();

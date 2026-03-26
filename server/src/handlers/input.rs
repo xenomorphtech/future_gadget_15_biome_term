@@ -8,7 +8,6 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::Deserialize;
 use std::io::Write;
 use utoipa::ToSchema;
-use uuid::Uuid;
 
 /// Input to write to a pane's PTY stdin.
 #[derive(Deserialize, ToSchema)]
@@ -25,25 +24,21 @@ pub struct InputRequest {
     post,
     path = "/panes/{id}/input",
     params(
-        ("id" = Uuid, Path, description = "Pane ID"),
+        ("id" = String, Path, description = "Pane ID or unique pane name"),
     ),
     request_body = InputRequest,
     responses(
         (status = 204, description = "Input written to PTY"),
-        (status = 400, description = "Invalid base64"),
+        (status = 400, description = "Invalid base64 or pane name is ambiguous"),
         (status = 404, description = "Pane not found"),
     )
 )]
 pub async fn send_input_handler(
-    Path(id): Path<Uuid>,
+    Path(id): Path<String>,
     State(state): State<AppState>,
     Json(body): Json<InputRequest>,
 ) -> Result<StatusCode, AppError> {
-    let pane = state
-        .panes
-        .get(&id)
-        .map(|r| r.clone())
-        .ok_or_else(|| AppError::NotFound(format!("pane {id} not found")))?;
+    let pane = state.get_pane(&id)?;
 
     let bytes = STANDARD
         .decode(&body.data)

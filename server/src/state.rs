@@ -1,4 +1,4 @@
-use crate::{pane::Pane, pane_lifecycle::PaneLifecycleEvent};
+use crate::{error::AppError, pane::Pane, pane_lifecycle::PaneLifecycleEvent};
 use dashmap::DashMap;
 use std::{env, sync::Arc};
 use tokio::sync::broadcast;
@@ -38,6 +38,43 @@ impl AppState {
 
     pub fn api_key(&self) -> Option<&str> {
         self.api_key.as_deref()
+    }
+
+    pub fn resolve_pane_id(&self, id_or_name: &str) -> Result<Uuid, AppError> {
+        if let Ok(id) = Uuid::parse_str(id_or_name) {
+            if self.panes.contains_key(&id) {
+                return Ok(id);
+            }
+        }
+
+        let mut matching_ids = self.panes.iter().filter_map(|entry| {
+            (entry.value().name.as_deref() == Some(id_or_name)).then_some(*entry.key())
+        });
+
+        match (matching_ids.next(), matching_ids.next()) {
+            (Some(id), None) => Ok(id),
+            (Some(_), Some(_)) => Err(AppError::BadRequest(format!(
+                "multiple panes named {id_or_name} found"
+            ))),
+            _ => Err(AppError::NotFound(format!("pane {id_or_name} not found"))),
+        }
+    }
+
+    pub fn get_pane(&self, id_or_name: &str) -> Result<Arc<Pane>, AppError> {
+        let id = self.resolve_pane_id(id_or_name)?;
+
+        self.panes
+            .get(&id)
+            .map(|pane| pane.clone())
+            .ok_or_else(|| AppError::NotFound(format!("pane {id_or_name} not found")))
+    }
+
+    pub fn remove_pane(&self, id_or_name: &str) -> Result<(Uuid, Arc<Pane>), AppError> {
+        let id = self.resolve_pane_id(id_or_name)?;
+
+        self.panes
+            .remove(&id)
+            .ok_or_else(|| AppError::NotFound(format!("pane {id_or_name} not found")))
     }
 }
 

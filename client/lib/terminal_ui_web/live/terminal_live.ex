@@ -3,6 +3,7 @@ defmodule TerminalUiWeb.TerminalLive do
 
   alias TerminalUi.{PaneSupervisor, TerminalClient}
 
+  @state_refresh_interval_ms 250
   @snippet_submit_delay_ms 500
   @idle_badge_threshold_seconds 5
 
@@ -15,13 +16,13 @@ defmodule TerminalUiWeb.TerminalLive do
         selected_pane_id: nil,
         screen: nil,
         new_pane_name: "",
-        snippet: ""
+        snippet: "",
+        snippet_panel_position: "bottom"
       )
 
     if connected?(socket) do
-      Phoenix.PubSub.subscribe(TerminalUi.PubSub, "panes")
       send(self(), :load_panes)
-      :timer.send_interval(1_000, :refresh_screen_idle)
+      :timer.send_interval(@state_refresh_interval_ms, :poll_terminal_state)
     end
 
     {:ok, socket}
@@ -29,42 +30,17 @@ defmodule TerminalUiWeb.TerminalLive do
 
   @impl true
   def handle_info(:load_panes, socket) do
-    {:noreply, sync_panes(socket, TerminalClient.list_panes())}
+    {:noreply, refresh_terminal_state(socket)}
   end
 
   @impl true
-  def handle_info({:panes_snapshot, panes}, socket) do
-    {:noreply, sync_panes(socket, panes)}
-  end
-
-  @impl true
-  def handle_info({:pane_created, pane}, socket) do
-    {:noreply, upsert_pane(socket, pane)}
-  end
-
-  @impl true
-  def handle_info({:pane_deleted, id}, socket) do
-    {:noreply, remove_pane(socket, id)}
-  end
-
-  @impl true
-  def handle_info({:pane_terminated, id}, socket) do
-    panes =
-      Enum.map(socket.assigns.panes, fn pane ->
-        if pane["id"] == id, do: Map.put(pane, "terminated", true), else: pane
-      end)
-
-    {:noreply, assign(socket, :panes, panes)}
+  def handle_info(:poll_terminal_state, socket) do
+    {:noreply, refresh_panes(socket)}
   end
 
   @impl true
   def handle_info({:screen_update, id, screen}, socket) do
     {:noreply, update_pane_buffer(socket, id, screen)}
-  end
-
-  @impl true
-  def handle_info(:refresh_screen_idle, socket) do
-    {:noreply, refresh_pane_buffer_idle(socket)}
   end
 
   @impl true
@@ -92,6 +68,12 @@ defmodule TerminalUiWeb.TerminalLive do
   end
 
   @impl true
+  def handle_event("set_snippet_panel_position", %{"position" => position}, socket) do
+    {:noreply,
+     assign(socket, :snippet_panel_position, normalize_snippet_panel_position(position))}
+  end
+
+  @impl true
   def handle_event("new_pane", %{"pane_name" => value}, socket) do
     name =
       case String.trim(value) do
@@ -103,7 +85,8 @@ defmodule TerminalUiWeb.TerminalLive do
 
     socket =
       socket
-      |> upsert_pane(pane, select: true)
+      |> refresh_terminal_state()
+      |> select_pane(pane["id"])
       |> assign(:new_pane_name, "")
 
     {:noreply, socket}
@@ -112,7 +95,7 @@ defmodule TerminalUiWeb.TerminalLive do
   @impl true
   def handle_event("kill_pane", %{"id" => id}, socket) do
     TerminalClient.kill_pane(id)
-    {:noreply, remove_pane(socket, id)}
+    {:noreply, refresh_terminal_state(socket)}
   end
 
   @impl true
@@ -136,7 +119,14 @@ defmodule TerminalUiWeb.TerminalLive do
     {:noreply, socket}
   end
 
+  defp select_pane(socket, nil) do
+    socket
+    |> configure_selected_pane_stream(nil)
+    |> assign(selected_pane_id: nil, screen: nil)
+  end
+
   defp select_pane(socket, new_id) do
+    socket = configure_selected_pane_stream(socket, new_id)
     {socket, pane_buffer} = ensure_pane_buffer_loaded(socket, new_id)
 
     assign(socket,
@@ -182,6 +172,9 @@ defmodule TerminalUiWeb.TerminalLive do
     Enum.any?(socket.assigns.panes, &(&1["id"] == id))
   end
 
+  defp normalize_snippet_panel_position("top"), do: "top"
+  defp normalize_snippet_panel_position(_position), do: "bottom"
+
   defp sync_panes(socket, panes) do
     current_ids =
       socket.assigns.panes
@@ -193,28 +186,15 @@ defmodule TerminalUiWeb.TerminalLive do
       |> Enum.map(& &1["id"])
       |> MapSet.new()
 
-    added_panes = Enum.reject(panes, &MapSet.member?(current_ids, &1["id"]))
     removed_ids = MapSet.difference(current_ids, next_ids) |> MapSet.to_list()
 
-    Enum.each(added_panes, fn pane ->
-      subscribe_to_pane_updates(pane["id"])
-      Task.start(fn -> PaneSupervisor.ensure_started(pane["id"]) end)
-    end)
-
-    Enum.each(removed_ids, fn pane_id ->
-      PaneSupervisor.stop(pane_id)
-      unsubscribe_from_pane_updates(pane_id)
-    end)
+    Enum.each(removed_ids, &PaneSupervisor.stop/1)
 
     pane_buffers =
       Enum.reduce(panes, socket.assigns.pane_buffers, fn pane, acc ->
         pane_id = pane["id"]
-
-        if Map.has_key?(acc, pane_id) do
-          acc
-        else
-          Map.put(acc, pane_id, load_pane_buffer(pane_id))
-        end
+        current_buffer = Map.get(acc, pane_id)
+        Map.put(acc, pane_id, sync_pane_buffer(pane, current_buffer))
       end)
       |> Map.take(Enum.map(panes, & &1["id"]))
 
@@ -228,27 +208,30 @@ defmodule TerminalUiWeb.TerminalLive do
   end
 
   defp load_pane_buffer(id) do
+    load_pane_buffer(id, nil)
+  end
+
+  defp load_pane_buffer(id, fallback) do
     case TerminalClient.get_screen(id) do
       {:ok, screen} ->
-        now_ms = System.monotonic_time(:millisecond)
-
-        %{
-          screen: screen,
-          idle_since_ms: now_ms,
-          idle_seconds: 0
-        }
+        Map.merge(
+          fallback_buffer(fallback),
+          %{
+            screen: screen
+          }
+        )
 
       _ ->
-        %{
-          screen: nil,
-          idle_since_ms: nil,
-          idle_seconds: 0
-        }
+        fallback_buffer(fallback)
     end
   end
 
   defp ensure_pane_buffer_loaded(socket, pane_id) do
     case Map.fetch(socket.assigns.pane_buffers, pane_id) do
+      {:ok, %{screen: nil} = pane_buffer} ->
+        loaded_buffer = load_pane_buffer(pane_id, pane_buffer)
+        {put_pane_buffer(socket, pane_id, loaded_buffer), loaded_buffer}
+
       {:ok, pane_buffer} ->
         {socket, pane_buffer}
 
@@ -258,59 +241,85 @@ defmodule TerminalUiWeb.TerminalLive do
     end
   end
 
+  defp refresh_terminal_state(socket) do
+    socket =
+      socket
+      |> refresh_panes()
+      |> refresh_selected_screen()
+
+    refresh_pane_buffer_idle(socket)
+  end
+
+  defp refresh_panes(socket) do
+    socket
+    |> sync_panes(TerminalClient.list_panes())
+    |> refresh_pane_buffer_idle()
+  end
+
+  defp refresh_selected_screen(socket) do
+    selected_pane_id = socket.assigns.selected_pane_id
+
+    cond do
+      is_nil(selected_pane_id) ->
+        socket
+
+      not pane_exists?(socket, selected_pane_id) ->
+        socket
+
+      true ->
+        case TerminalClient.get_screen(selected_pane_id) do
+          {:ok, screen} -> update_pane_buffer(socket, selected_pane_id, screen)
+          _ -> socket
+        end
+    end
+  end
+
   defp put_pane_buffer(socket, pane_id, pane_buffer) do
     assign(socket, :pane_buffers, Map.put(socket.assigns.pane_buffers, pane_id, pane_buffer))
   end
 
-  defp upsert_pane(socket, pane, opts \\ []) do
-    pane_id = pane["id"]
+  defp sync_pane_buffer(pane, current_buffer) do
+    idle_seconds = Map.get(pane, "idle_seconds", 0)
+    now_ms = System.monotonic_time(:millisecond)
 
-    socket =
-      if pane_exists?(socket, pane_id) do
-        panes =
-          Enum.map(socket.assigns.panes, fn current_pane ->
-            if current_pane["id"] == pane_id,
-              do: Map.merge(current_pane, pane),
-              else: current_pane
-          end)
-
-        assign(socket, :panes, panes)
-      else
-        subscribe_to_pane_updates(pane_id)
-        Task.start(fn -> PaneSupervisor.ensure_started(pane_id) end)
-
-        socket
-        |> assign(:panes, socket.assigns.panes ++ [pane])
-        |> put_pane_buffer(pane_id, load_pane_buffer(pane_id))
-      end
-
-    cond do
-      opts[:select] ->
-        select_pane(socket, pane_id)
-
-      is_nil(socket.assigns.selected_pane_id) ->
-        select_pane(socket, pane_id)
-
-      true ->
-        socket
-    end
+    %{
+      screen: current_buffer && current_buffer.screen,
+      idle_since_ms: now_ms - idle_seconds * 1_000,
+      idle_seconds: idle_seconds
+    }
   end
 
-  defp remove_pane(socket, id) do
-    if pane_exists?(socket, id) do
-      PaneSupervisor.stop(id)
-      unsubscribe_from_pane_updates(id)
-      panes = Enum.reject(socket.assigns.panes, &(&1["id"] == id))
+  defp fallback_buffer(nil) do
+    %{
+      screen: nil,
+      idle_since_ms: nil,
+      idle_seconds: 0
+    }
+  end
 
-      socket =
-        assign(socket,
-          panes: panes,
-          pane_buffers: Map.delete(socket.assigns.pane_buffers, id)
-        )
+  defp fallback_buffer(buffer), do: buffer
 
-      ensure_valid_selection(socket)
-    else
-      socket
+  defp configure_selected_pane_stream(socket, new_id) do
+    current_id = socket.assigns.selected_pane_id
+
+    cond do
+      not connected?(socket) ->
+        socket
+
+      current_id == new_id ->
+        socket
+
+      true ->
+        if current_id do
+          Phoenix.PubSub.unsubscribe(TerminalUi.PubSub, "pane:#{current_id}")
+        end
+
+        if new_id do
+          Phoenix.PubSub.subscribe(TerminalUi.PubSub, "pane:#{new_id}")
+          Task.start(fn -> PaneSupervisor.ensure_started(new_id) end)
+        end
+
+        socket
     end
   end
 
@@ -395,7 +404,7 @@ defmodule TerminalUiWeb.TerminalLive do
   defp ensure_valid_selection(socket) do
     case socket.assigns.panes do
       [] ->
-        assign(socket, selected_pane_id: nil, screen: nil)
+        select_pane(socket, nil)
 
       [%{"id" => first_id} | _] ->
         cond do
@@ -414,11 +423,105 @@ defmodule TerminalUiWeb.TerminalLive do
     end
   end
 
-  defp subscribe_to_pane_updates(pane_id) do
-    Phoenix.PubSub.subscribe(TerminalUi.PubSub, "pane:#{pane_id}")
-  end
+  attr :selected_pane_id, :string, default: nil
+  attr :snippet, :string, required: true
+  attr :position, :string, required: true
 
-  defp unsubscribe_from_pane_updates(pane_id) do
-    Phoenix.PubSub.unsubscribe(TerminalUi.PubSub, "pane:#{pane_id}")
+  def snippet_panel(assigns) do
+    ~H"""
+    <form
+      id="snippet-form"
+      phx-change="set_snippet"
+      phx-submit="inject_snippet"
+      phx-hook="SnippetInput"
+      data-history-scope={@selected_pane_id || ""}
+      class={[
+        "bg-gray-950 p-3",
+        if(@position == "top", do: "border-b border-gray-800", else: "border-t border-gray-800")
+      ]}
+    >
+      <div class="flex items-end gap-3">
+        <div class="flex-1">
+          <div class="mb-2 flex items-center justify-between gap-3">
+            <label
+              for="snippet-input"
+              class="block text-xs font-semibold uppercase tracking-wide text-gray-400"
+            >
+              Inject Snippet
+            </label>
+            <div class="flex flex-wrap items-center justify-end gap-2">
+              <span class="text-[11px] text-gray-500">Alt+↑ / Alt+↓ history</span>
+              <div class="flex items-center rounded border border-gray-700 p-0.5">
+                <button
+                  type="button"
+                  phx-click="set_snippet_panel_position"
+                  phx-value-position="top"
+                  class={
+                    if @position == "top" do
+                      "rounded bg-blue-600 px-2 py-1 text-[11px] font-semibold text-white"
+                    else
+                      "rounded px-2 py-1 text-[11px] font-semibold text-gray-400 hover:text-gray-200"
+                    end
+                  }
+                >
+                  Top
+                </button>
+                <button
+                  type="button"
+                  phx-click="set_snippet_panel_position"
+                  phx-value-position="bottom"
+                  class={
+                    if @position == "bottom" do
+                      "rounded bg-blue-600 px-2 py-1 text-[11px] font-semibold text-white"
+                    else
+                      "rounded px-2 py-1 text-[11px] font-semibold text-gray-400 hover:text-gray-200"
+                    end
+                  }
+                >
+                  Bottom
+                </button>
+              </div>
+              <button
+                type="button"
+                data-history-nav="prev"
+                disabled={is_nil(@selected_pane_id)}
+                class="rounded border border-gray-700 px-2 py-1 text-[11px] font-semibold text-gray-300 disabled:cursor-not-allowed disabled:border-gray-800 disabled:text-gray-600"
+              >
+                Prev
+              </button>
+              <button
+                type="button"
+                data-history-nav="next"
+                disabled={is_nil(@selected_pane_id)}
+                class="rounded border border-gray-700 px-2 py-1 text-[11px] font-semibold text-gray-300 disabled:cursor-not-allowed disabled:border-gray-800 disabled:text-gray-600"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+          <textarea
+            id="snippet-input"
+            name="snippet"
+            rows="5"
+            class="w-full resize-y rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            placeholder="Paste multiline input here. It will be sent to the selected pane through the input API."
+          ><%= @snippet %></textarea>
+        </div>
+        <button
+          type="submit"
+          disabled={is_nil(@selected_pane_id) or @snippet == ""}
+          class={
+            if is_nil(@selected_pane_id) or @snippet == "" do
+              "shrink-0 rounded bg-gray-700 px-4 py-2 text-sm font-semibold text-gray-400 cursor-not-allowed"
+            else
+              "shrink-0 rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"
+            end
+          }
+        >
+          Send
+        </button>
+      </div>
+    </form>
+    """
   end
 end

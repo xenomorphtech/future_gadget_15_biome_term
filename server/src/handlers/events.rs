@@ -6,7 +6,6 @@ use axum::{
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
-use uuid::Uuid;
 
 /// Query parameters for the events endpoint.
 #[derive(Deserialize, IntoParams)]
@@ -35,24 +34,21 @@ pub struct EventResponse {
     get,
     path = "/panes/{id}/events",
     params(
-        ("id" = Uuid, Path, description = "Pane ID"),
+        ("id" = String, Path, description = "Pane ID or unique pane name"),
         EventsQuery,
     ),
     responses(
         (status = 200, description = "Events since `after`", body = Vec<EventResponse>),
+        (status = 400, description = "Pane name is ambiguous"),
         (status = 404, description = "Pane not found"),
     )
 )]
 pub async fn get_events_handler(
-    Path(id): Path<Uuid>,
+    Path(id): Path<String>,
     Query(query): Query<EventsQuery>,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<EventResponse>>, AppError> {
-    let pane = state
-        .panes
-        .get(&id)
-        .map(|r| r.clone())
-        .ok_or_else(|| AppError::NotFound(format!("pane {id} not found")))?;
+    let pane = state.get_pane(&id)?;
 
     let after_seq = query.after.unwrap_or(0);
     let log = pane.event_log.read().await;

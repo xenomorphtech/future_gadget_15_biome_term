@@ -67,6 +67,13 @@
     </div>
   </aside>
   <main class="flex-1 flex flex-col overflow-hidden">
+    <%= if @snippet_panel_position == "top" do %>
+      <.snippet_panel
+        selected_pane_id={@selected_pane_id}
+        snippet={@snippet}
+        position={@snippet_panel_position}
+      />
+    <% end %>
     <div
       class="flex-1 overflow-auto bg-black p-2"
       id="terminal-viewport"
@@ -83,65 +90,12 @@
         <p class="text-gray-600 p-4 text-sm">Select or create a pane.</p>
       <% end %>
     </div>
-    <form
-      id="snippet-form"
-      phx-change="set_snippet"
-      phx-submit="inject_snippet"
-      phx-hook="SnippetInput"
-      data-history-scope={@selected_pane_id || ""}
-      class="border-t border-gray-800 bg-gray-950 p-3"
-    >
-      <div class="flex items-end gap-3">
-        <div class="flex-1">
-          <div class="mb-2 flex items-center justify-between gap-3">
-            <label
-              for="snippet-input"
-              class="block text-xs font-semibold uppercase tracking-wide text-gray-400"
-            >
-              Inject Snippet
-            </label>
-            <div class="flex items-center gap-2">
-              <span class="text-[11px] text-gray-500">Alt+↑ / Alt+↓ history</span>
-              <button
-                type="button"
-                data-history-nav="prev"
-                disabled={is_nil(@selected_pane_id)}
-                class="rounded border border-gray-700 px-2 py-1 text-[11px] font-semibold text-gray-300 disabled:cursor-not-allowed disabled:border-gray-800 disabled:text-gray-600"
-              >
-                Prev
-              </button>
-              <button
-                type="button"
-                data-history-nav="next"
-                disabled={is_nil(@selected_pane_id)}
-                class="rounded border border-gray-700 px-2 py-1 text-[11px] font-semibold text-gray-300 disabled:cursor-not-allowed disabled:border-gray-800 disabled:text-gray-600"
-              >
-                Next
-              </button>
-            </div>
-          </div>
-          <textarea
-            id="snippet-input"
-            name="snippet"
-            rows="5"
-            class="w-full resize-y rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-            placeholder="Paste multiline input here. It will be sent to the selected pane through the input API."
-          ><%= @snippet %></textarea>
-        </div>
-        <button
-          type="submit"
-          disabled={is_nil(@selected_pane_id) or @snippet == ""}
-          class={
-            if is_nil(@selected_pane_id) or @snippet == "" do
-              "shrink-0 rounded bg-gray-700 px-4 py-2 text-sm font-semibold text-gray-400 cursor-not-allowed"
-            else
-              "shrink-0 rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"
-            end
-          }
-        >
-          Send
-        </button>
-      </div>
-    </form>
+    <%= if @snippet_panel_position != "top" do %>
+      <.snippet_panel
+        selected_pane_id={@selected_pane_id}
+        snippet={@snippet}
+        position={@snippet_panel_position}
+      />
+    <% end %>
   </main>
 </div>
