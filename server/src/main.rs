@@ -7,6 +7,7 @@ use tokio::sync::watch;
 
 #[tokio::main]
 async fn main() {
+    raise_nofile_limit();
     let state = AppState::from_env();
     let router = build_router(state.clone());
     let http_config = HttpConfig::from_env();
@@ -182,6 +183,32 @@ impl TlsConfig {
                 None
             }
             (None, None) => None,
+        }
+    }
+}
+
+/// Raise the open-file limit (RLIMIT_NOFILE) to the hard limit.
+fn raise_nofile_limit() {
+    #[cfg(unix)]
+    {
+        let mut rlim = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        unsafe {
+            if libc::getrlimit(libc::RLIMIT_NOFILE, &mut rlim) == 0 {
+                if rlim.rlim_cur < rlim.rlim_max {
+                    let prev = rlim.rlim_cur;
+                    rlim.rlim_cur = rlim.rlim_max;
+                    if libc::setrlimit(libc::RLIMIT_NOFILE, &rlim) == 0 {
+                        println!("Raised open-file limit from {prev} to {}", rlim.rlim_max);
+                    } else {
+                        eprintln!("Failed to raise open-file limit (setrlimit)");
+                    }
+                }
+            } else {
+                eprintln!("Failed to query open-file limit (getrlimit)");
+            }
         }
     }
 }
