@@ -1,6 +1,8 @@
 defmodule TerminalUiWeb.TerminalLive do
   use TerminalUiWeb, :live_view
 
+  require Logger
+
   alias TerminalUi.{PaneSupervisor, TerminalClient}
 
   @state_refresh_interval_ms 250
@@ -35,7 +37,7 @@ defmodule TerminalUiWeb.TerminalLive do
 
   @impl true
   def handle_info(:poll_terminal_state, socket) do
-    {:noreply, refresh_panes(socket)}
+    {:noreply, refresh_polled_terminal_state(socket)}
   end
 
   @impl true
@@ -250,6 +252,13 @@ defmodule TerminalUiWeb.TerminalLive do
     refresh_pane_buffer_idle(socket)
   end
 
+  defp refresh_polled_terminal_state(socket) do
+    socket
+    |> refresh_panes()
+    |> ensure_selected_pane_stream()
+    |> refresh_selected_screen()
+  end
+
   defp refresh_panes(socket) do
     socket
     |> sync_panes(TerminalClient.list_panes())
@@ -316,10 +325,40 @@ defmodule TerminalUiWeb.TerminalLive do
 
         if new_id do
           Phoenix.PubSub.subscribe(TerminalUi.PubSub, "pane:#{new_id}")
-          Task.start(fn -> PaneSupervisor.ensure_started(new_id) end)
+          ensure_pane_stream_started(new_id)
         end
 
         socket
+    end
+  end
+
+  defp ensure_selected_pane_stream(socket) do
+    pane_id = socket.assigns.selected_pane_id
+
+    cond do
+      not connected?(socket) ->
+        socket
+
+      is_nil(pane_id) ->
+        socket
+
+      not pane_exists?(socket, pane_id) ->
+        socket
+
+      true ->
+        ensure_pane_stream_started(pane_id)
+        socket
+    end
+  end
+
+  defp ensure_pane_stream_started(pane_id) do
+    case PaneSupervisor.ensure_started(pane_id) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("failed to start pane stream for #{pane_id}: #{inspect(reason)}")
+        :ok
     end
   end
 
