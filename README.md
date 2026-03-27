@@ -116,6 +116,7 @@ a different port than the local HTTP listener.
 
 - `LISTEN_ADDR`: chooses the HTTP port, but the host is always forced to `127.0.0.1`. For example, `LISTEN_ADDR=0.0.0.0:3100` still binds HTTP to `127.0.0.1:3100`.
 - `BIOME_API_KEY`: if set, all HTTP and WebSocket endpoints require either `Authorization: Bearer <key>` or `X-API-Key: <key>`. If unset, the server stays open for backwards compatibility.
+- `BIOME_DEFAULT_MAX_EVENTS`: startup default for the per-pane event log retention limit. If unset, the server keeps `10_000` events per pane.
 - `BIOME_TLS_CERT` and `BIOME_TLS_KEY`: enable HTTPS/WSS when both are set to certificate and private-key files.
 - `BIOME_TLS_LISTEN_ADDR`: HTTPS bind address, default `0.0.0.0:3027`. This port must differ from the HTTP port.
 
@@ -148,6 +149,32 @@ See **[docs/api.md](docs/api.md)** for the full reference (also live at `GET /op
 
 ```bash
 cd server && cargo run --bin gen-docs   # regenerate docs/api.md
+```
+
+### Runtime API Configuration
+
+The server now exposes `GET /config` and `PATCH /config` for runtime defaults.
+
+- `default_cols` and `default_rows` control the terminal size used by `POST /panes` when the request omits `cols` or `rows`.
+- `default_max_events` controls the event-log retention limit for panes created after the update.
+- `apply_to_existing=true` immediately resizes all running panes to the new default size. This is user-visible and behaves like calling `POST /panes/{id}/resize` for every pane.
+- `default_max_events` is not retroactive. Existing panes keep the event-log limit they were created with.
+
+Examples:
+
+```bash
+# Inspect current runtime defaults
+curl http://127.0.0.1:3021/config
+
+# Change defaults for future panes only
+curl -X PATCH http://127.0.0.1:3021/config \
+  -H 'content-type: application/json' \
+  -d '{"default_cols":160,"default_rows":40,"default_max_events":20000}'
+
+# Change defaults and immediately resize every running pane
+curl -X PATCH http://127.0.0.1:3021/config \
+  -H 'content-type: application/json' \
+  -d '{"default_cols":132,"default_rows":41,"apply_to_existing":true}'
 ```
 
 ## Running Tests

@@ -1,6 +1,9 @@
 use crate::{
-    error::AppError, handlers::list::PaneInfo, pane::create_pane,
-    pane_lifecycle::PaneLifecycleEvent, state::AppState,
+    error::AppError,
+    handlers::list::PaneInfo,
+    pane::{create_pane, PaneSize},
+    pane_lifecycle::PaneLifecycleEvent,
+    state::AppState,
 };
 use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
@@ -12,9 +15,9 @@ use uuid::Uuid;
 pub struct CreatePaneRequest {
     /// Human-readable label for this pane (optional)
     pub name: Option<String>,
-    /// Terminal width in columns (default: 220)
+    /// Terminal width in columns (default: server-configured default, initially 220)
     pub cols: Option<u16>,
-    /// Terminal height in rows (default: 50)
+    /// Terminal height in rows (default: server-configured default, initially 50)
     pub rows: Option<u16>,
     /// Shell executable path (default: /bin/bash)
     pub shell: Option<String>,
@@ -42,6 +45,7 @@ pub struct CreatePaneResponse {
     request_body = CreatePaneRequest,
     responses(
         (status = 200, description = "Pane created", body = CreatePaneResponse),
+        (status = 400, description = "Invalid pane dimensions"),
         (status = 500, description = "Failed to open PTY or spawn shell"),
     )
 )]
@@ -49,10 +53,16 @@ pub async fn create_pane_handler(
     State(state): State<AppState>,
     Json(body): Json<CreatePaneRequest>,
 ) -> Result<Json<CreatePaneResponse>, AppError> {
-    let cols = body.cols.unwrap_or(220);
-    let rows = body.rows.unwrap_or(50);
+    let default_size = state.get_default_pane_size();
+    let size = PaneSize {
+        cols: body.cols.unwrap_or(default_size.cols),
+        rows: body.rows.unwrap_or(default_size.rows),
+    }
+    .validate()
+    .map_err(AppError::BadRequest)?;
 
-    let pane = create_pane(cols, rows, body.shell, body.name).map_err(|e| AppError::Internal(e))?;
+    let max_events = state.get_default_max_events();
+    let pane = create_pane(size, body.shell, body.name, max_events).map_err(AppError::Internal)?;
 
     let id = pane.id;
     let name = pane.name.clone();
@@ -65,7 +75,7 @@ pub async fn create_pane_handler(
     Ok(Json(CreatePaneResponse {
         id,
         name,
-        cols,
-        rows,
+        cols: size.cols,
+        rows: size.rows,
     }))
 }

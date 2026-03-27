@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const DEFAULT_MAX_EVENTS: usize = 10_000;
+pub const DEFAULT_MAX_EVENTS: usize = 10_000;
 
 #[derive(Clone)]
 pub struct Event {
@@ -18,10 +18,14 @@ pub struct EventLog {
 
 impl EventLog {
     pub fn new() -> Self {
+        Self::with_max_events(DEFAULT_MAX_EVENTS)
+    }
+
+    pub fn with_max_events(max_events: usize) -> Self {
         EventLog {
             events: VecDeque::new(),
             next_seq: 1,
-            max_events: DEFAULT_MAX_EVENTS,
+            max_events,
         }
     }
 

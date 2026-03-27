@@ -2,9 +2,24 @@ use crate::event::{now_ms, Event, EventLog};
 use portable_pty::{Child, CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem};
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock as StdRwLock};
 use tokio::sync::{broadcast, RwLock};
 use uuid::Uuid;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PaneSize {
+    pub cols: u16,
+    pub rows: u16,
+}
+
+impl PaneSize {
+    pub fn validate(self) -> Result<Self, String> {
+        if self.cols == 0 || self.rows == 0 {
+            return Err("cols and rows must be >= 1".to_string());
+        }
+        Ok(self)
+    }
+}
 
 pub struct Pane {
     pub id: Uuid,
@@ -19,25 +34,35 @@ pub struct Pane {
     pub parser: Arc<RwLock<vt100::Parser>>,
     pub event_log: Arc<RwLock<EventLog>>,
     pub broadcast_tx: broadcast::Sender<Arc<Event>>,
-    pub cols: u16,
-    pub rows: u16,
+    pub size: StdRwLock<PaneSize>,
     /// Set to true when the PTY read loop exits (shell exited or was killed).
     pub terminated: Arc<AtomicBool>,
     /// Epoch millis of the last pane activity. Updated on input writes and PTY output.
     pub last_activity_ms: Arc<AtomicU64>,
 }
 
+impl Pane {
+    pub fn size(&self) -> PaneSize {
+        *self.size.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn set_size(&self, size: PaneSize) {
+        *self.size.write().unwrap_or_else(|e| e.into_inner()) = size;
+    }
+}
+
 pub fn create_pane(
-    cols: u16,
-    rows: u16,
+    size: PaneSize,
     shell: Option<String>,
     name: Option<String>,
+    max_events: usize,
 ) -> Result<Arc<Pane>, String> {
+    let size = size.validate()?;
     let pty_system = NativePtySystem::default();
     let pair = pty_system
         .openpty(PtySize {
-            rows,
-            cols,
+            rows: size.rows,
+            cols: size.cols,
             pixel_width: 0,
             pixel_height: 0,
         })
@@ -67,8 +92,8 @@ pub fn create_pane(
         .try_clone_reader()
         .map_err(|e| format!("try_clone_reader failed: {e}"))?;
 
-    let parser = Arc::new(RwLock::new(vt100::Parser::new(rows, cols, 0)));
-    let event_log = Arc::new(RwLock::new(EventLog::new()));
+    let parser = Arc::new(RwLock::new(vt100::Parser::new(size.rows, size.cols, 0)));
+    let event_log = Arc::new(RwLock::new(EventLog::with_max_events(max_events)));
     let (broadcast_tx, _) = broadcast::channel::<Arc<Event>>(4096);
     let terminated = Arc::new(AtomicBool::new(false));
 
@@ -87,8 +112,7 @@ pub fn create_pane(
         parser: parser.clone(),
         event_log: event_log.clone(),
         broadcast_tx: broadcast_tx.clone(),
-        cols,
-        rows,
+        size: StdRwLock::new(size),
         terminated: terminated.clone(),
         last_activity_ms: last_activity_ms.clone(),
     });
@@ -154,4 +178,28 @@ fn spawn_pty_read_loop(
             drop(guard.take());
         }
     });
+}
+
+pub async fn resize_pane(pane: &Pane, size: PaneSize) -> Result<(), String> {
+    let size = size.validate()?;
+
+    {
+        let master = pane.master.lock().await;
+        master
+            .resize(PtySize {
+                rows: size.rows,
+                cols: size.cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| format!("resize failed: {e}"))?;
+    }
+
+    {
+        let mut parser = pane.parser.write().await;
+        parser.screen_mut().set_size(size.rows, size.cols);
+    }
+
+    pane.set_size(size);
+    Ok(())
 }

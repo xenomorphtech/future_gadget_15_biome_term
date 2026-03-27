@@ -10,6 +10,8 @@ use utoipa::OpenApi;
                        state so clients can reconnect without losing history."
     ),
     paths(
+        crate::handlers::config::get_config_handler,
+        crate::handlers::config::update_config_handler,
         crate::handlers::create::create_pane_handler,
         crate::handlers::list::list_panes_handler,
         crate::handlers::delete::delete_pane_handler,
@@ -20,6 +22,8 @@ use utoipa::OpenApi;
         crate::handlers::stream::ws_stream_handler,
     ),
     components(schemas(
+        crate::handlers::config::ConfigResponse,
+        crate::handlers::config::ConfigUpdateRequest,
         crate::handlers::create::CreatePaneRequest,
         crate::handlers::create::CreatePaneResponse,
         crate::handlers::list::PaneInfo,

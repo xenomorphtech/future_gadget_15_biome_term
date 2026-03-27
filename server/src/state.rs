@@ -1,6 +1,17 @@
-use crate::{error::AppError, pane::Pane, pane_lifecycle::PaneLifecycleEvent};
+use crate::{
+    error::AppError,
+    event::DEFAULT_MAX_EVENTS,
+    pane::{Pane, PaneSize},
+    pane_lifecycle::PaneLifecycleEvent,
+};
 use dashmap::DashMap;
-use std::{env, sync::Arc};
+use std::{
+    env,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, RwLock,
+    },
+};
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
@@ -11,6 +22,8 @@ pub struct AppState {
     pub panes: Arc<PaneMap>,
     pub pane_lifecycle_tx: broadcast::Sender<PaneLifecycleEvent>,
     api_key: Option<Arc<str>>,
+    pub default_max_events: Arc<AtomicUsize>,
+    pub default_pane_size: Arc<RwLock<PaneSize>>,
 }
 
 impl AppState {
@@ -29,11 +42,43 @@ impl AppState {
     pub fn with_api_key(api_key: Option<String>) -> Self {
         let (pane_lifecycle_tx, _) = broadcast::channel(1024);
 
+        let max_events = env::var("BIOME_DEFAULT_MAX_EVENTS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(DEFAULT_MAX_EVENTS);
+
         AppState {
             panes: Arc::new(PaneMap::new()),
             pane_lifecycle_tx,
             api_key: api_key.map(Arc::<str>::from),
+            default_max_events: Arc::new(AtomicUsize::new(max_events)),
+            default_pane_size: Arc::new(RwLock::new(PaneSize {
+                cols: 220,
+                rows: 50,
+            })),
         }
+    }
+
+    pub fn get_default_max_events(&self) -> usize {
+        self.default_max_events.load(Ordering::Relaxed)
+    }
+
+    pub fn set_default_max_events(&self, n: usize) {
+        self.default_max_events.store(n, Ordering::Relaxed);
+    }
+
+    pub fn get_default_pane_size(&self) -> PaneSize {
+        *self
+            .default_pane_size
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn set_default_pane_size(&self, size: PaneSize) {
+        *self
+            .default_pane_size
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = size;
     }
 
     pub fn api_key(&self) -> Option<&str> {

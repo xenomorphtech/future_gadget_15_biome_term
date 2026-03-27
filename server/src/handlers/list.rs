@@ -25,11 +25,12 @@ impl PaneInfo {
         let last = pane.last_activity_ms.load(Ordering::Relaxed);
         let now = now_ms();
         let idle_ms = now.saturating_sub(last);
+        let size = pane.size();
         PaneInfo {
             id: pane.id,
             name: pane.name.clone(),
-            cols: pane.cols,
-            rows: pane.rows,
+            cols: size.cols,
+            rows: size.rows,
             terminated: pane.terminated.load(Ordering::Relaxed),
             idle_seconds: idle_ms / 1000,
         }

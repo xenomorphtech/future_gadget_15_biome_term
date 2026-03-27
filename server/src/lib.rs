@@ -10,13 +10,20 @@ pub mod state;
 use auth::require_api_key;
 use axum::{
     middleware,
-    routing::{delete, get, post},
+    routing::{delete, get, patch, post},
     Json, Router,
 };
 use handlers::{
-    create::create_pane_handler, delete::delete_pane_handler, events::get_events_handler,
-    input::send_input_handler, lifecycle::ws_pane_lifecycle_handler, list::list_panes_handler,
-    resize::resize_pane_handler, screen::get_screen_handler, stream::ws_stream_handler,
+    config::{get_config_handler, update_config_handler},
+    create::create_pane_handler,
+    delete::delete_pane_handler,
+    events::get_events_handler,
+    input::send_input_handler,
+    lifecycle::ws_pane_lifecycle_handler,
+    list::list_panes_handler,
+    resize::resize_pane_handler,
+    screen::get_screen_handler,
+    stream::ws_stream_handler,
 };
 use openapi::ApiDoc;
 use state::AppState;
@@ -25,6 +32,8 @@ use utoipa::OpenApi;
 
 pub fn build_router(state: AppState) -> Router {
     Router::new()
+        .route("/config", get(get_config_handler))
+        .route("/config", patch(update_config_handler))
         .route("/panes", post(create_pane_handler))
         .route("/panes", get(list_panes_handler))
         .route("/panes/lifecycle", get(ws_pane_lifecycle_handler))

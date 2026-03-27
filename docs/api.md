@@ -8,6 +8,66 @@ HTTP + WebSocket API for managing persistent PTY sessions backed by a VT100 emul
 
 ## Endpoints
 
+### `GET /config`
+
+Get the current server configuration.
+
+Returns the defaults used when `POST /panes` omits `cols` and `rows`, plus
+the default per-pane event log retention limit.
+
+**Responses**
+
+| Status | Description |
+|--------|-------------|
+| `200` | Current configuration |
+
+**Response Body**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `default_cols` | int32 | ✓ | Default terminal width in columns for newly created panes. |
+| `default_max_events` | integer | ✓ | Default maximum number of events retained per pane. |
+| `default_rows` | int32 | ✓ | Default terminal height in rows for newly created panes. |
+
+---
+
+### `PATCH /config`
+
+Update server configuration.
+
+Changes take effect for newly created panes. When `apply_to_existing` is set,
+the resulting default terminal size is also applied to running panes
+immediately, using the same resize path as `POST /panes/{id}/resize`.
+Existing panes keep their current event log limits; `default_max_events`
+only affects panes created after the update.
+
+**Request Body** (`application/json`)
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `apply_to_existing` | boolean | — | When true, also resize all existing panes to the resulting default size. |
+| `default_cols` | int32 | — | New default terminal width in columns for newly created panes. |
+| `default_max_events` | integer | — | New default maximum number of events retained per pane (min: 100). |
+| `default_rows` | int32 | — | New default terminal height in rows for newly created panes. |
+
+**Responses**
+
+| Status | Description |
+|--------|-------------|
+| `200` | Updated configuration |
+| `400` | Invalid configuration values |
+| `500` | Failed to resize an existing pane |
+
+**Response Body**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `default_cols` | int32 | ✓ | Default terminal width in columns for newly created panes. |
+| `default_max_events` | integer | ✓ | Default maximum number of events retained per pane. |
+| `default_rows` | int32 | ✓ | Default terminal height in rows for newly created panes. |
+
+---
+
 ### `GET /panes`
 
 List all active panes.
@@ -24,6 +84,7 @@ List all active panes.
 |-------|------|----------|-------------|
 | `cols` | int32 | ✓ |  |
 | `id` | uuid | ✓ | Unique pane identifier |
+| `idle_seconds` | int64 | ✓ | Seconds since the last pane activity (input or PTY output) |
 | `name` | string | — | Human-readable label, if provided at creation |
 | `rows` | int32 | ✓ |  |
 | `terminated` | boolean | ✓ | True when the shell process has exited |
@@ -42,9 +103,9 @@ immediately; connect via `/panes/{id}/stream` to receive live updates.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `cols` | int32 | — | Terminal width in columns (default: 220) |
+| `cols` | int32 | — | Terminal width in columns (default: server-configured default, initially 220) |
 | `name` | string | — | Human-readable label for this pane (optional) |
-| `rows` | int32 | — | Terminal height in rows (default: 50) |
+| `rows` | int32 | — | Terminal height in rows (default: server-configured default, initially 50) |
 | `shell` | string | — | Shell executable path (default: /bin/bash) |
 
 **Responses**
@@ -52,6 +113,7 @@ immediately; connect via `/panes/{id}/stream` to receive live updates.
 | Status | Description |
 |--------|-------------|
 | `200` | Pane created |
+| `400` | Invalid pane dimensions |
 | `500` | Failed to open PTY or spawn shell |
 
 **Response Body**
@@ -76,13 +138,14 @@ Any connected WebSocket subscribers will receive a `Closed` error.
 
 | Name | Type | Description |
 |------|------|-------------|
-| `id` | uuid | Pane ID |
+| `id` | string | Pane ID or unique pane name |
 
 **Responses**
 
 | Status | Description |
 |--------|-------------|
 | `204` | Pane killed and removed |
+| `400` | Pane name is ambiguous |
 | `404` | Pane not found |
 
 ---
@@ -99,7 +162,7 @@ For a live stream use `GET /panes/{id}/stream` (WebSocket).
 
 | Name | Type | Description |
 |------|------|-------------|
-| `id` | uuid | Pane ID |
+| `id` | string | Pane ID or unique pane name |
 | `after` | int64 | Return only events with `seq` greater than this value. Use `0` (default) to get all events. |
 
 **Responses**
@@ -107,6 +170,7 @@ For a live stream use `GET /panes/{id}/stream` (WebSocket).
 | Status | Description |
 |--------|-------------|
 | `200` | Events since `after` |
+| `400` | Pane name is ambiguous |
 | `404` | Pane not found |
 
 **Response Body (array items)**
@@ -130,7 +194,7 @@ ANSI/VT escape sequences (e.g. `\x1b[A` for arrow-up).
 
 | Name | Type | Description |
 |------|------|-------------|
-| `id` | uuid | Pane ID |
+| `id` | string | Pane ID or unique pane name |
 
 **Request Body** (`application/json`)
 
@@ -143,7 +207,7 @@ ANSI/VT escape sequences (e.g. `\x1b[A` for arrow-up).
 | Status | Description |
 |--------|-------------|
 | `204` | Input written to PTY |
-| `400` | Invalid base64 |
+| `400` | Invalid base64 or pane name is ambiguous |
 | `404` | Pane not found |
 
 ---
@@ -174,6 +238,7 @@ The shell prompt is typically redrawn within milliseconds.
 | Status | Description |
 |--------|-------------|
 | `204` | Pane resized |
+| `400` | Invalid pane dimensions |
 | `404` | Pane not found |
 | `500` | PTY resize syscall failed |
 
@@ -191,13 +256,14 @@ This is a snapshot; subscribe to `/panes/{id}/stream` for live updates.
 
 | Name | Type | Description |
 |------|------|-------------|
-| `id` | uuid | Pane ID |
+| `id` | string | Pane ID or unique pane name |
 
 **Responses**
 
 | Status | Description |
 |--------|-------------|
 | `200` | Current screen state |
+| `400` | Pane name is ambiguous |
 | `404` | Pane not found |
 
 **Response Body**
@@ -243,15 +309,36 @@ forwarded in real time.
 
 ## Schemas
 
+### `ConfigResponse`
+
+Server configuration.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `default_cols` | int32 | ✓ | Default terminal width in columns for newly created panes. |
+| `default_max_events` | integer | ✓ | Default maximum number of events retained per pane. |
+| `default_rows` | int32 | ✓ | Default terminal height in rows for newly created panes. |
+
+### `ConfigUpdateRequest`
+
+Partial update to server configuration.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `apply_to_existing` | boolean | — | When true, also resize all existing panes to the resulting default size. |
+| `default_cols` | int32 | — | New default terminal width in columns for newly created panes. |
+| `default_max_events` | integer | — | New default maximum number of events retained per pane (min: 100). |
+| `default_rows` | int32 | — | New default terminal height in rows for newly created panes. |
+
 ### `CreatePaneRequest`
 
 Request body for creating a new pane.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `cols` | int32 | — | Terminal width in columns (default: 220) |
+| `cols` | int32 | — | Terminal width in columns (default: server-configured default, initially 220) |
 | `name` | string | — | Human-readable label for this pane (optional) |
-| `rows` | int32 | — | Terminal height in rows (default: 50) |
+| `rows` | int32 | — | Terminal height in rows (default: server-configured default, initially 50) |
 | `shell` | string | — | Shell executable path (default: /bin/bash) |
 
 ### `CreatePaneResponse`
@@ -291,6 +378,7 @@ Summary of an active pane.
 |-------|------|----------|-------------|
 | `cols` | int32 | ✓ |  |
 | `id` | uuid | ✓ | Unique pane identifier |
+| `idle_seconds` | int64 | ✓ | Seconds since the last pane activity (input or PTY output) |
 | `name` | string | — | Human-readable label, if provided at creation |
 | `rows` | int32 | ✓ |  |
 | `terminated` | boolean | ✓ | True when the shell process has exited |

@@ -43,9 +43,28 @@ async fn create_pane_response(
         body["name"] = serde_json::Value::String(name.to_string());
     }
 
+    create_pane_with_body_response(client, base, body).await
+}
+
+async fn create_pane_with_body_response(
+    client: &reqwest::Client,
+    base: &str,
+    body: serde_json::Value,
+) -> serde_json::Value {
     client
         .post(format!("{base}/panes"))
         .json(&body)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap()
+}
+
+async fn get_config(client: &reqwest::Client, base: &str) -> serde_json::Value {
+    client
+        .get(format!("{base}/config"))
         .send()
         .await
         .unwrap()
@@ -337,6 +356,131 @@ async fn test_list_and_delete() {
         !arr2.iter().any(|p| p["id"].as_str() == Some(&id)),
         "Deleted pane should not appear in list"
     );
+}
+
+#[tokio::test]
+async fn test_config_updates_defaults_for_future_panes_only() {
+    let base = start_test_server().await;
+    let client = reqwest::Client::new();
+
+    let initial = get_config(&client, &base).await;
+    assert_eq!(initial["default_cols"].as_u64(), Some(220));
+    assert_eq!(initial["default_rows"].as_u64(), Some(50));
+
+    let before = create_pane_with_body_response(&client, &base, serde_json::json!({})).await;
+    let before_id = before["id"].as_str().unwrap().to_string();
+    assert_eq!(before["cols"].as_u64(), Some(220));
+    assert_eq!(before["rows"].as_u64(), Some(50));
+
+    let updated: serde_json::Value = client
+        .patch(format!("{base}/config"))
+        .json(&serde_json::json!({ "default_cols": 100, "default_rows": 30 }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(updated["default_cols"].as_u64(), Some(100));
+    assert_eq!(updated["default_rows"].as_u64(), Some(30));
+
+    let after = create_pane_with_body_response(&client, &base, serde_json::json!({})).await;
+    let after_id = after["id"].as_str().unwrap().to_string();
+    assert_eq!(after["cols"].as_u64(), Some(100));
+    assert_eq!(after["rows"].as_u64(), Some(30));
+
+    let list = list_panes(&client, &base).await;
+    let panes = list.as_array().unwrap();
+    let before_pane = panes
+        .iter()
+        .find(|pane| pane["id"].as_str() == Some(before_id.as_str()))
+        .expect("existing pane should still exist");
+    let after_pane = panes
+        .iter()
+        .find(|pane| pane["id"].as_str() == Some(after_id.as_str()))
+        .expect("new pane should exist");
+
+    assert_eq!(before_pane["cols"].as_u64(), Some(220));
+    assert_eq!(before_pane["rows"].as_u64(), Some(50));
+    assert_eq!(after_pane["cols"].as_u64(), Some(100));
+    assert_eq!(after_pane["rows"].as_u64(), Some(30));
+
+    delete_pane(&client, &base, &before_id).await;
+    delete_pane(&client, &base, &after_id).await;
+}
+
+#[tokio::test]
+async fn test_config_apply_to_existing_resizes_running_panes() {
+    let base = start_test_server().await;
+    let client = reqwest::Client::new();
+
+    let first = create_pane_with_body_response(&client, &base, serde_json::json!({})).await;
+    let second = create_pane_with_body_response(
+        &client,
+        &base,
+        serde_json::json!({ "cols": 90, "rows": 25 }),
+    )
+    .await;
+    let first_id = first["id"].as_str().unwrap().to_string();
+    let second_id = second["id"].as_str().unwrap().to_string();
+
+    let response = client
+        .patch(format!("{base}/config"))
+        .json(&serde_json::json!({
+            "default_cols": 132,
+            "default_rows": 41,
+            "apply_to_existing": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let list = list_panes(&client, &base).await;
+    for id in [&first_id, &second_id] {
+        let pane = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|pane| pane["id"].as_str() == Some(id.as_str()))
+            .expect("pane should appear in list");
+        assert_eq!(pane["cols"].as_u64(), Some(132));
+        assert_eq!(pane["rows"].as_u64(), Some(41));
+
+        let screen = get_screen(&client, &base, id).await;
+        assert_eq!(screen["num_cols"].as_u64(), Some(132));
+        assert_eq!(screen["num_rows"].as_u64(), Some(41));
+    }
+
+    delete_pane(&client, &base, &first_id).await;
+    delete_pane(&client, &base, &second_id).await;
+}
+
+#[tokio::test]
+async fn test_resize_updates_list_dimensions() {
+    let base = start_test_server().await;
+    let client = reqwest::Client::new();
+    let id = create_pane(&client, &base).await;
+
+    let response = client
+        .post(format!("{base}/panes/{id}/resize"))
+        .json(&serde_json::json!({ "cols": 132, "rows": 41 }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    let list = list_panes(&client, &base).await;
+    let pane = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|pane| pane["id"].as_str() == Some(id.as_str()))
+        .expect("pane should appear in list");
+    assert_eq!(pane["cols"].as_u64(), Some(132));
+    assert_eq!(pane["rows"].as_u64(), Some(41));
+
+    delete_pane(&client, &base, &id).await;
 }
 
 #[tokio::test]
