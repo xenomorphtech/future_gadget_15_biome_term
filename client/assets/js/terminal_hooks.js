@@ -45,7 +45,7 @@ export const SnippetInput = {
         return;
       }
 
-      if (e.key === "Enter" && e.ctrlKey) {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         const value = textarea.value;
         if (value.trim() !== "") {

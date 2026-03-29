@@ -2,4 +2,13 @@
 @import "tailwindcss/components";
 @import "tailwindcss/utilities";
 
-/* This file is for your main application CSS */
+/* Use dynamic viewport height so iPad/mobile doesn't overflow behind the address bar */
+.h-dvh {
+  height: 100dvh;
+}
+
+html, body {
+  height: 100dvh;
+  overflow: hidden;
+  -webkit-overflow-scrolling: touch;
+}
