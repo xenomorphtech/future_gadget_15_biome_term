@@ -140,18 +140,10 @@ defmodule TerminalUiWeb.TerminalLive do
   end
 
   defp select_pane(socket, new_id) do
-    socket = configure_selected_pane_stream(socket, new_id)
-    {socket, pane_buffer} = ensure_pane_buffer_loaded(socket, new_id)
-
     socket
-    |> assign(
-      selected_pane_id: new_id,
-      screen: pane_buffer.screen
-    )
-    # Pane buffers are only kept live for the currently selected pane, so when
-    # switching back to an older pane we need an immediate refresh instead of
-    # waiting for the next poll tick to replace a stale cached screen.
-    |> refresh_selected_screen()
+    |> configure_selected_pane_stream(new_id)
+    |> assign(selected_pane_id: new_id)
+    |> refresh_pane_screen(new_id)
   end
 
   defp send_input(nil, _data), do: :ok
@@ -303,9 +295,23 @@ defmodule TerminalUiWeb.TerminalLive do
         socket
 
       true ->
-        case TerminalClient.get_screen(selected_pane_id) do
-          {:ok, screen} -> update_pane_buffer(socket, selected_pane_id, screen)
-          _ -> socket
+        refresh_pane_screen(socket, selected_pane_id)
+    end
+  end
+
+  defp refresh_pane_screen(socket, pane_id) do
+    case TerminalClient.get_screen(pane_id) do
+      {:ok, screen} ->
+        update_pane_buffer(socket, pane_id, screen)
+
+      _ ->
+        pane_buffer = Map.get(socket.assigns.pane_buffers, pane_id, fallback_buffer(nil))
+        socket = put_pane_buffer(socket, pane_id, pane_buffer)
+
+        if socket.assigns.selected_pane_id == pane_id do
+          assign(socket, :screen, pane_buffer.screen)
+        else
+          socket
         end
     end
   end
