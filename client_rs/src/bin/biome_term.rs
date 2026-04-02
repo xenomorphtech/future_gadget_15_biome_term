@@ -1,6 +1,6 @@
-use std::io::Write;
+use std::{fs, io::Write, path::PathBuf};
 
-use biome_term_client::{BiomeTermClient, CreatePaneOptions};
+use biome_term_client::{BiomeTermClient, BiomeTermClientBuilder, CreatePaneOptions};
 use clap::{Parser, Subcommand};
 use futures_util::StreamExt;
 
@@ -8,8 +8,20 @@ use futures_util::StreamExt;
 #[command(name = "biome-term", about = "CLI for the biome_term PTY server")]
 struct Cli {
     /// Server base URL
-    #[arg(long, env = "BIOME_TERM_URL", default_value = "http://localhost:3021")]
-    url: String,
+    #[arg(long)]
+    url: Option<String>,
+
+    /// API key sent as Authorization: Bearer <key>
+    #[arg(long, env = "BIOME_API_KEY")]
+    api_key: Option<String>,
+
+    /// PEM file containing one or more trusted root certificates for HTTPS/WSS
+    #[arg(long, env = "BIOME_TLS_CA_CERT")]
+    ca_cert: Option<PathBuf>,
+
+    /// Disable TLS certificate and hostname validation
+    #[arg(long, action = clap::ArgAction::SetTrue)]
+    insecure: bool,
 
     #[command(subcommand)]
     cmd: Cmd,
@@ -58,13 +70,68 @@ enum Cmd {
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
-    let client = BiomeTermClient::new(&cli.url);
+    let client = match build_client(&cli) {
+        Ok(client) => client,
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(1);
+        }
+    };
 
     let result = run(cli.cmd, client).await;
     if let Err(e) = result {
         eprintln!("error: {e}");
         std::process::exit(1);
     }
+}
+
+fn build_client(cli: &Cli) -> Result<BiomeTermClient, biome_term_client::Error> {
+    let url = cli
+        .url
+        .clone()
+        .or_else(default_url_from_env)
+        .unwrap_or_else(|| "http://localhost:3021".to_string());
+
+    let mut builder = BiomeTermClient::builder(&url);
+    if let Some(api_key) = cli.api_key.clone() {
+        builder = builder.api_key(api_key);
+    }
+    if let Some(path) = &cli.ca_cert {
+        builder = add_root_cert_from_path(builder, path)?;
+    }
+    if cli.insecure || env_flag("BIOME_TLS_INSECURE") {
+        builder = builder
+            .danger_accept_invalid_certs(true)
+            .danger_accept_invalid_hostnames(true);
+    }
+    builder.build()
+}
+
+fn add_root_cert_from_path(
+    builder: BiomeTermClientBuilder,
+    path: &PathBuf,
+) -> Result<BiomeTermClientBuilder, biome_term_client::Error> {
+    Ok(builder.add_root_certificate_pem(fs::read(path)?))
+}
+
+fn default_url_from_env() -> Option<String> {
+    env_string("BIOME_TERM_URL").or_else(|| env_string("BIOME_URL"))
+}
+
+fn env_string(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
+fn env_flag(name: &str) -> bool {
+    env_string(name).is_some_and(|value| {
+        matches!(
+            value.to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
 }
 
 async fn run(cmd: Cmd, client: BiomeTermClient) -> Result<(), biome_term_client::Error> {

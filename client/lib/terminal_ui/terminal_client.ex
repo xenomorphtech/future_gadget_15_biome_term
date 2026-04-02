@@ -91,7 +91,7 @@ defmodule TerminalUi.TerminalClient do
   defp auth_headers do
     case api_key() do
       nil -> []
-      key -> [{"authorization", "Bearer #{key}"}]
+      key -> [{"authorization", "Bearer #{key}"}, {"x-api-key", key}]
     end
   end
 

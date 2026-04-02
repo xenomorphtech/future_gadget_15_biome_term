@@ -1,11 +1,19 @@
 use std::{
     collections::HashMap,
+    fs,
     sync::{Arc, Mutex},
 };
 
-use biome_term_client::{BiomeTermClient, CreatePaneOptions, LifecycleEvent, PaneInfo};
+use biome_term_client::{
+    BiomeTermClient, BiomeTermClientBuilder, CreatePaneOptions, LifecycleEvent, PaneInfo,
+};
 use eframe::egui;
 use futures_util::StreamExt;
+
+const BLACK: egui::Color32 = egui::Color32::BLACK;
+const GREEN: egui::Color32 = egui::Color32::from_rgb(0, 255, 0);
+const DIM_GREEN: egui::Color32 = egui::Color32::from_rgb(0, 160, 0);
+const DARK_GREEN: egui::Color32 = egui::Color32::from_rgb(0, 32, 0);
 
 // ── Messages from background tasks ───────────────────────────────────────────
 
@@ -19,7 +27,15 @@ enum Msg {
 
 struct PaneState {
     parser: Arc<Mutex<vt100::Parser>>,
-    _task: tokio::task::JoinHandle<()>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+#[derive(Clone)]
+struct ConnectionSettings {
+    url: String,
+    api_key: String,
+    ca_cert_path: String,
+    insecure_tls: bool,
 }
 
 // ── App ───────────────────────────────────────────────────────────────────────
@@ -29,6 +45,7 @@ struct App {
     client: Arc<BiomeTermClient>,
     tx: std::sync::mpsc::SyncSender<Msg>,
     rx: std::sync::mpsc::Receiver<Msg>,
+    lifecycle_task: Option<tokio::task::JoinHandle<()>>,
 
     panes: Vec<PaneInfo>,
     pane_states: HashMap<String, PaneState>,
@@ -38,12 +55,16 @@ struct App {
     new_pane_name: String,
     server_url: String,
     url_buf: String,
-    editing_url: bool,
+    api_key_buf: String,
+    ca_cert_path_buf: String,
+    insecure_tls_buf: bool,
     font_size: f32,
     status: String,
 
     /// Terminal area has keyboard focus — all keys go straight to the PTY.
     terminal_focused: bool,
+    /// Last rendered terminal panel rect, used to release direct input mode on outside clicks.
+    terminal_rect: Option<egui::Rect>,
     /// Resize dimensions to send on demand (not auto-applied).
     resize_cols: u16,
     resize_rows: u16,
@@ -57,37 +78,54 @@ struct App {
 }
 
 impl App {
-    fn new(_cc: &eframe::CreationContext) -> Self {
+    fn new(cc: &eframe::CreationContext, settings: ConnectionSettings) -> Self {
+        apply_theme(&cc.egui_ctx);
+
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .unwrap();
         let (tx, rx) = std::sync::mpsc::sync_channel(512);
-        let server_url = "http://localhost:3021".to_string();
-        let client = Arc::new(BiomeTermClient::new(&server_url));
-        rt.spawn(lifecycle_task(client.clone(), tx.clone()));
-        Self {
+        let (client, server_url, status) = match build_client(&settings) {
+            Ok(client) => (Arc::new(client), settings.url.clone(), String::new()),
+            Err(err) => {
+                let fallback_url = "http://localhost:3021".to_string();
+                (
+                    Arc::new(BiomeTermClient::new(&fallback_url)),
+                    fallback_url,
+                    format!("⚠ {err}"),
+                )
+            }
+        };
+
+        let mut app = Self {
             rt,
             client,
             tx,
             rx,
+            lifecycle_task: None,
             panes: Vec::new(),
             pane_states: HashMap::new(),
             selected_id: None,
             input: String::new(),
             new_pane_name: String::new(),
-            url_buf: server_url.clone(),
             server_url,
-            editing_url: false,
+            url_buf: settings.url,
+            api_key_buf: settings.api_key,
+            ca_cert_path_buf: settings.ca_cert_path,
+            insecure_tls_buf: settings.insecure_tls,
             font_size: 13.0,
-            status: String::new(),
+            status,
             terminal_focused: false,
+            terminal_rect: None,
             resize_cols: 80,
             resize_rows: 24,
             history: Vec::new(),
             history_pos: None,
             history_draft: String::new(),
-        }
+        };
+        app.spawn_lifecycle_task();
+        app
     }
 
     fn select_pane(&mut self, id: String, ctx: egui::Context) {
@@ -113,21 +151,53 @@ impl App {
             id.clone(),
             PaneState {
                 parser,
-                _task: handle,
+                task: handle,
             },
         );
         self.selected_id = Some(id);
     }
 
     fn reconnect(&mut self) {
-        self.server_url = self.url_buf.trim().to_owned();
-        self.client = Arc::new(BiomeTermClient::new(&self.server_url));
-        self.pane_states.clear();
-        self.panes.clear();
-        self.selected_id = None;
-        self.rt
+        let settings = ConnectionSettings {
+            url: self.url_buf.trim().to_owned(),
+            api_key: self.api_key_buf.trim().to_owned(),
+            ca_cert_path: self.ca_cert_path_buf.trim().to_owned(),
+            insecure_tls: self.insecure_tls_buf,
+        };
+
+        match build_client(&settings) {
+            Ok(client) => {
+                self.abort_background_tasks();
+                self.server_url = settings.url;
+                self.client = Arc::new(client);
+                self.panes.clear();
+                self.selected_id = None;
+                self.spawn_lifecycle_task();
+                self.status = format!("Connecting to {}...", self.server_url);
+            }
+            Err(err) => {
+                self.status = format!("⚠ {err}");
+            }
+        }
+    }
+
+    fn spawn_lifecycle_task(&mut self) {
+        if let Some(handle) = self.lifecycle_task.take() {
+            handle.abort();
+        }
+        let handle = self
+            .rt
             .spawn(lifecycle_task(self.client.clone(), self.tx.clone()));
-        self.status = format!("Connecting to {}…", self.server_url);
+        self.lifecycle_task = Some(handle);
+    }
+
+    fn abort_background_tasks(&mut self) {
+        if let Some(handle) = self.lifecycle_task.take() {
+            handle.abort();
+        }
+        for (_, state) in self.pane_states.drain() {
+            state.task.abort();
+        }
     }
 }
 
@@ -135,6 +205,17 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        apply_theme(ctx);
+
+        if self.terminal_focused
+            && ctx.input(|i| i.pointer.primary_clicked())
+            && ctx
+                .input(|i| i.pointer.interact_pos())
+                .is_some_and(|pos| self.terminal_rect.is_none_or(|rect| !rect.contains(pos)))
+        {
+            self.terminal_focused = false;
+        }
+
         // ── direct key input (must happen before any TextEdit is rendered) ────
         if self.terminal_focused {
             // Hold a virtual focus ID so no TextEdit thinks it has focus.
@@ -183,8 +264,17 @@ impl eframe::App for App {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
                 Msg::PanesUpdated(panes) => {
-                    self.pane_states
-                        .retain(|id, _| panes.iter().any(|p| &p.id == id));
+                    let removed_ids: Vec<String> = self
+                        .pane_states
+                        .keys()
+                        .filter(|id| !panes.iter().any(|pane| &pane.id == *id))
+                        .cloned()
+                        .collect();
+                    for id in removed_ids {
+                        if let Some(state) = self.pane_states.remove(&id) {
+                            state.task.abort();
+                        }
+                    }
                     if let Some(ref sel) = self.selected_id {
                         if !panes.iter().any(|p| &p.id == sel) {
                             self.selected_id = None;
@@ -214,41 +304,42 @@ impl eframe::App for App {
                 ui.heading("biome_term");
                 ui.separator();
 
-                // URL bar
-                ui.horizontal(|ui| {
-                    if self.editing_url {
-                        let resp = ui.add(
-                            egui::TextEdit::singleline(&mut self.url_buf)
-                                .desired_width(140.0)
-                                .hint_text("http://..."),
-                        );
-                        if resp.lost_focus() && ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            self.editing_url = false;
-                            do_reconnect = true;
-                        }
-                        if ui.small_button("✓").clicked() {
-                            self.editing_url = false;
-                            do_reconnect = true;
-                        }
-                    } else {
-                        ui.label(
-                            egui::RichText::new(&self.server_url)
-                                .small()
-                                .color(egui::Color32::GRAY),
-                        );
-                        if ui.small_button("✎").clicked() {
-                            self.url_buf = self.server_url.clone();
-                            self.editing_url = true;
-                        }
-                    }
-                });
+                ui.label(egui::RichText::new("Connection").small().color(DIM_GREEN));
+                let url_resp = ui.add(
+                    egui::TextEdit::singleline(&mut self.url_buf)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("https://host:3027"),
+                );
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.api_key_buf)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("API key")
+                        .password(true),
+                );
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.ca_cert_path_buf)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("/path/to/ca.pem"),
+                );
+                ui.checkbox(
+                    &mut self.insecure_tls_buf,
+                    "Allow invalid TLS certs / hostnames",
+                );
+                if ui.button("Connect").clicked()
+                    || (url_resp.lost_focus() && ctx.input(|i| i.key_pressed(egui::Key::Enter)))
+                {
+                    do_reconnect = true;
+                }
+                if self.server_url != self.url_buf.trim() {
+                    ui.label(
+                        egui::RichText::new(format!("Active: {}", self.server_url))
+                            .small()
+                            .color(DIM_GREEN),
+                    );
+                }
 
                 if !self.status.is_empty() {
-                    ui.label(
-                        egui::RichText::new(&self.status)
-                            .small()
-                            .color(egui::Color32::YELLOW),
-                    );
+                    ui.label(egui::RichText::new(&self.status).small().color(GREEN));
                 }
 
                 ui.separator();
@@ -260,11 +351,7 @@ impl eframe::App for App {
                         for pane in &self.panes {
                             let label = pane.name.as_deref().unwrap_or(&pane.id[..8]);
                             let is_sel = self.selected_id.as_deref() == Some(&pane.id);
-                            let color = if pane.terminated {
-                                egui::Color32::GRAY
-                            } else {
-                                egui::Color32::WHITE
-                            };
+                            let color = if pane.terminated { DIM_GREEN } else { GREEN };
                             ui.horizontal(|ui| {
                                 if ui
                                     .selectable_label(
@@ -310,11 +397,7 @@ impl eframe::App for App {
                 });
 
                 ui.separator();
-                ui.label(
-                    egui::RichText::new("Resize")
-                        .small()
-                        .color(egui::Color32::GRAY),
-                );
+                ui.label(egui::RichText::new("Resize").small().color(DIM_GREEN));
                 ui.horizontal(|ui| {
                     ui.add(
                         egui::DragValue::new(&mut self.resize_cols)
@@ -385,14 +468,10 @@ impl eframe::App for App {
                 // Show mode indicator; clicking here returns to typed-input mode.
                 let resp = ui
                     .horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new("⌨ DIRECT INPUT")
-                                .color(egui::Color32::from_rgb(100, 220, 100))
-                                .small(),
-                        );
+                        ui.label(egui::RichText::new("⌨ DIRECT INPUT").color(GREEN).small());
                         ui.label(
                             egui::RichText::new("(click here for typed input)")
-                                .color(egui::Color32::GRAY)
+                                .color(DIM_GREEN)
                                 .small(),
                         )
                     })
@@ -414,7 +493,7 @@ impl eframe::App for App {
             } else {
                 let resp = ui
                     .horizontal(|ui| {
-                        ui.label(egui::RichText::new(">").color(egui::Color32::GREEN));
+                        ui.label(egui::RichText::new(">").color(GREEN));
                         ui.add(
                             egui::TextEdit::singleline(&mut self.input)
                                 .desired_width(f32::INFINITY)
@@ -515,6 +594,7 @@ impl eframe::App for App {
         egui::CentralPanel::default().show(ctx, |ui| {
             // Detect clicks on the terminal area to enter direct-input mode.
             let panel_rect = ui.max_rect();
+            self.terminal_rect = Some(panel_rect);
             if ctx.input(|i| {
                 i.pointer.primary_clicked()
                     && i.pointer
@@ -537,7 +617,7 @@ impl eframe::App for App {
                         egui::RichText::new(
                             "Select a pane from the left panel, or press + to create one.",
                         )
-                        .color(egui::Color32::GRAY),
+                        .color(DIM_GREEN),
                     );
                 });
             }
@@ -547,13 +627,66 @@ impl eframe::App for App {
             self.terminal_focused = true;
         }
     }
+
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        BLACK.to_normalized_gamma_f32()
+    }
 }
 
 // ── Terminal renderer ─────────────────────────────────────────────────────────
 
+fn apply_theme(ctx: &egui::Context) {
+    let visuals = terminal_visuals();
+    ctx.set_theme(egui::Theme::Dark);
+    ctx.set_visuals_of(egui::Theme::Dark, visuals.clone());
+    ctx.set_visuals_of(egui::Theme::Light, visuals.clone());
+}
+
+fn terminal_visuals() -> egui::Visuals {
+    let mut visuals = egui::Visuals::dark();
+    visuals.override_text_color = Some(GREEN);
+    visuals.panel_fill = BLACK;
+    visuals.window_fill = BLACK;
+    visuals.extreme_bg_color = BLACK;
+    visuals.faint_bg_color = DARK_GREEN;
+    visuals.code_bg_color = BLACK;
+    visuals.hyperlink_color = GREEN;
+    visuals.warn_fg_color = GREEN;
+    visuals.error_fg_color = GREEN;
+    visuals.selection.bg_fill = DARK_GREEN;
+    visuals.selection.stroke = egui::Stroke::new(1.0, GREEN);
+
+    visuals.widgets.noninteractive.bg_fill = BLACK;
+    visuals.widgets.noninteractive.weak_bg_fill = BLACK;
+    visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, DARK_GREEN);
+    visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, GREEN);
+
+    visuals.widgets.inactive.bg_fill = BLACK;
+    visuals.widgets.inactive.weak_bg_fill = BLACK;
+    visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, DIM_GREEN);
+    visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, GREEN);
+
+    visuals.widgets.hovered.bg_fill = DARK_GREEN;
+    visuals.widgets.hovered.weak_bg_fill = DARK_GREEN;
+    visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, GREEN);
+    visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, GREEN);
+
+    visuals.widgets.active.bg_fill = DARK_GREEN;
+    visuals.widgets.active.weak_bg_fill = DARK_GREEN;
+    visuals.widgets.active.bg_stroke = egui::Stroke::new(1.5, GREEN);
+    visuals.widgets.active.fg_stroke = egui::Stroke::new(1.0, GREEN);
+
+    visuals.widgets.open.bg_fill = BLACK;
+    visuals.widgets.open.weak_bg_fill = BLACK;
+    visuals.widgets.open.bg_stroke = egui::Stroke::new(1.0, GREEN);
+    visuals.widgets.open.fg_stroke = egui::Stroke::new(1.0, GREEN);
+
+    visuals
+}
+
 fn render_terminal(ui: &mut egui::Ui, parser: &vt100::Parser, font_size: f32, focused: bool) {
-    const BG: egui::Color32 = egui::Color32::from_rgb(18, 18, 18);
-    const FG: egui::Color32 = egui::Color32::from_rgb(220, 220, 220);
+    const BG: egui::Color32 = BLACK;
+    const FG: egui::Color32 = GREEN;
 
     let font_id = egui::FontId::monospace(font_size);
     let screen = parser.screen();
@@ -561,7 +694,7 @@ fn render_terminal(ui: &mut egui::Ui, parser: &vt100::Parser, font_size: f32, fo
     let cursor = screen.cursor_position();
 
     let border_color = if focused {
-        egui::Color32::from_rgb(80, 180, 80)
+        GREEN
     } else {
         egui::Color32::TRANSPARENT
     };
@@ -604,7 +737,7 @@ fn render_terminal(ui: &mut egui::Ui, parser: &vt100::Parser, font_size: f32, fo
                             if cell.inverse() ^ is_cursor {
                                 std::mem::swap(&mut fg, &mut bg);
                             } else if is_cursor {
-                                bg = egui::Color32::from_rgb(200, 200, 200);
+                                bg = GREEN;
                                 fg = BG;
                             }
 
@@ -757,6 +890,127 @@ fn key_to_pty_bytes(key: &egui::Key, modifiers: &egui::Modifiers) -> Option<Vec<
     Some(bytes.to_vec())
 }
 
+fn env_connection_settings() -> ConnectionSettings {
+    ConnectionSettings {
+        url: env_string("BIOME_TERM_URL")
+            .or_else(|| env_string("BIOME_URL"))
+            .unwrap_or_else(|| "http://localhost:3021".to_string()),
+        api_key: env_string("BIOME_API_KEY").unwrap_or_default(),
+        ca_cert_path: env_string("BIOME_TLS_CA_CERT").unwrap_or_default(),
+        insecure_tls: env_flag("BIOME_TLS_INSECURE"),
+    }
+}
+
+fn initial_connection_settings() -> Result<ConnectionSettings, String> {
+    apply_cli_overrides(env_connection_settings())
+}
+
+fn apply_cli_overrides(mut settings: ConnectionSettings) -> Result<ConnectionSettings, String> {
+    let mut args = std::env::args().skip(1);
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--server" | "-server" | "--url" | "-url" => {
+                settings.url = normalize_server_arg(next_arg_value(&mut args, &arg)?);
+            }
+            "--apikey" | "-apikey" | "--api-key" | "-api-key" => {
+                settings.api_key = next_arg_value(&mut args, &arg)?;
+            }
+            "--cacert" | "-cacert" | "--ca-cert" | "-ca-cert" => {
+                settings.ca_cert_path = next_arg_value(&mut args, &arg)?;
+            }
+            "--insecure" | "-insecure" => {
+                settings.insecure_tls = true;
+            }
+            "--help" | "-help" | "-h" => {
+                return Err(gui_usage());
+            }
+            _ => {
+                return Err(format!("unknown argument: {arg}\n\n{}", gui_usage()));
+            }
+        }
+    }
+
+    Ok(settings)
+}
+
+fn next_arg_value(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<String, String> {
+    args.next()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| format!("missing value for {flag}\n\n{}", gui_usage()))
+}
+
+fn normalize_server_arg(server: String) -> String {
+    let trimmed = server.trim();
+    if trimmed.contains("://") {
+        trimmed.to_owned()
+    } else {
+        format!("http://{trimmed}")
+    }
+}
+
+fn gui_usage() -> String {
+    [
+        "Usage: biome-term-gui [-server HOST[:PORT]|URL] [-apikey KEY] [-cacert PATH] [-insecure]",
+        "",
+        "Examples:",
+        "  biome-term-gui -server sg.orch.run:3021 -apikey mykey",
+        "  biome-term-gui -server https://host.example:3027 -apikey mykey -cacert ca.pem",
+        "",
+        "Notes:",
+        "  - If -server has no scheme, http:// is assumed.",
+        "  - Use an explicit https:// URL when the remote endpoint is TLS-enabled.",
+    ]
+    .join("\n")
+}
+
+fn build_client(settings: &ConnectionSettings) -> Result<BiomeTermClient, String> {
+    if settings.url.trim().is_empty() {
+        return Err("server URL cannot be empty".to_string());
+    }
+
+    let mut builder = BiomeTermClient::builder(settings.url.trim());
+    if !settings.api_key.trim().is_empty() {
+        builder = builder.api_key(settings.api_key.trim());
+    }
+    if !settings.ca_cert_path.trim().is_empty() {
+        builder = add_root_cert_from_path(builder, settings.ca_cert_path.trim())
+            .map_err(|e| format!("failed to read CA certificate: {e}"))?;
+    }
+    if settings.insecure_tls {
+        builder = builder
+            .danger_accept_invalid_certs(true)
+            .danger_accept_invalid_hostnames(true);
+    }
+
+    builder
+        .build()
+        .map_err(|e| format!("failed to build client: {e}"))
+}
+
+fn add_root_cert_from_path(
+    builder: BiomeTermClientBuilder,
+    path: &str,
+) -> Result<BiomeTermClientBuilder, std::io::Error> {
+    Ok(builder.add_root_certificate_pem(fs::read(path)?))
+}
+
+fn env_string(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
+fn env_flag(name: &str) -> bool {
+    env_string(name).is_some_and(|value| {
+        matches!(
+            value.to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
+}
+
 // ── Background tasks ──────────────────────────────────────────────────────────
 
 async fn lifecycle_task(client: Arc<BiomeTermClient>, tx: std::sync::mpsc::SyncSender<Msg>) {
@@ -820,6 +1074,18 @@ async fn stream_pane_task(
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 fn main() -> eframe::Result<()> {
+    let settings = match initial_connection_settings() {
+        Ok(settings) => settings,
+        Err(message) => {
+            if message.starts_with("Usage: ") {
+                println!("{message}");
+                std::process::exit(0);
+            }
+            eprintln!("{message}");
+            std::process::exit(2);
+        }
+    };
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("biome_term")
@@ -830,6 +1096,6 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "biome_term",
         options,
-        Box::new(|cc| Ok(Box::new(App::new(cc)))),
+        Box::new(move |cc| Ok(Box::new(App::new(cc, settings.clone())))),
     )
 }

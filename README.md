@@ -44,7 +44,7 @@ Features:
 
 ```bash
 cd gui_client_rs && cargo run
-# or set BIOME_TERM_URL=http://host:3021 cargo run
+# or set BIOME_TERM_URL=https://host:3027 BIOME_API_KEY=... BIOME_TLS_CA_CERT=/path/to/ca.pem cargo run
 ```
 
 ### CLI (`client_rs`)
@@ -58,6 +58,13 @@ cargo run --bin biome-term -- list
 cargo run --bin biome-term -- input <ID> "echo hello\r"
 cargo run --bin biome-term -- stream <ID>    # live PTY output to stdout
 cargo run --bin biome-term -- lifecycle      # pane create/delete events as JSON
+
+# HTTPS/WSS with API key + custom CA bundle
+cargo run --bin biome-term -- \
+  --url https://localhost:3027 \
+  --api-key changeme \
+  --ca-cert /path/to/server.crt \
+  list
 ```
 
 ### Phoenix LiveView (`client`)
@@ -122,8 +129,10 @@ a different port than the local HTTP listener.
 
 ### Client
 
-- `BIOME_URL`: base URL for the Rust server. Use `http://localhost:3021` for local HTTP or something like `https://host.example:3027` when TLS is enabled.
-- `BIOME_API_KEY`: API key sent by the Elixir client for both `Req` requests and websocket handshakes.
+- `BIOME_TERM_URL`: base URL for the Rust clients. `BIOME_URL` is also accepted as a fallback. Use `http://localhost:3021` for local HTTP or `https://host.example:3027` when TLS is enabled.
+- `BIOME_API_KEY`: API key sent by the Rust CLI, Rust GUI, and Elixir client for both HTTP requests and websocket handshakes.
+- `BIOME_TLS_CA_CERT`: PEM file containing one or more trusted root certificates for the Rust CLI and Rust GUI when connecting to a custom or self-signed TLS listener.
+- `BIOME_TLS_INSECURE`: when set to `1`, `true`, `yes`, or `on`, the Rust CLI and Rust GUI skip TLS certificate and hostname validation. This is for local testing only.
 
 ### Example
 
