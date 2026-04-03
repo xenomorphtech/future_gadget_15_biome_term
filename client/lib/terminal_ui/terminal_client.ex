@@ -8,10 +8,26 @@ defmodule TerminalUi.TerminalClient do
     Req.get!(base_url() <> "/panes", req_options()).body
   end
 
-  def create_pane(cols \\ 220, rows \\ 50, name \\ nil) do
+  def list_panes(group: group) do
+    Req.get!(base_url() <> "/panes", Keyword.merge(req_options(), params: [group: group])).body
+  end
+
+  def list_groups do
+    Req.get!(base_url() <> "/groups", req_options()).body
+  end
+
+  def create_pane(cols \\ 220, rows \\ 50, name \\ nil, group \\ nil) do
     body = %{cols: cols, rows: rows}
     body = if name, do: Map.put(body, :name, name), else: body
+    body = if group, do: Map.put(body, :group, group), else: body
     Req.post!(base_url() <> "/panes", Keyword.merge(req_options(), json: body)).body
+  end
+
+  def update_group(id, group) do
+    Req.put!(
+      base_url() <> "/panes/#{id}/group",
+      Keyword.merge(req_options(), json: %{group: group})
+    )
   end
 
   def kill_pane(id) do

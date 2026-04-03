@@ -72,6 +72,12 @@ only affects panes created after the update.
 
 List all active panes.
 
+**Query Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `group` | string | Filter panes by group name |
+
 **Responses**
 
 | Status | Description |
@@ -83,11 +89,24 @@ List all active panes.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `cols` | int32 | ✓ |  |
+| `group` | string | — | Process group tag (e.g. domain name) |
 | `id` | uuid | ✓ | Unique pane identifier |
 | `idle_seconds` | int64 | ✓ | Seconds since the last pane activity (input or PTY output) |
 | `name` | string | — | Human-readable label, if provided at creation |
 | `rows` | int32 | ✓ |  |
 | `terminated` | boolean | ✓ | True when the shell process has exited |
+
+---
+
+### `GET /groups`
+
+List all distinct group names across active panes.
+
+**Responses**
+
+| Status | Description |
+|--------|-------------|
+| `200` | Array of distinct group names (strings) |
 
 ---
 
@@ -104,6 +123,7 @@ immediately; connect via `/panes/{id}/stream` to receive live updates.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `cols` | int32 | — | Terminal width in columns (default: server-configured default, initially 220) |
+| `group` | string | — | Process group tag (e.g. domain name) |
 | `name` | string | — | Human-readable label for this pane (optional) |
 | `rows` | int32 | — | Terminal height in rows (default: server-configured default, initially 50) |
 | `shell` | string | — | Shell executable path (default: /bin/bash) |
@@ -121,6 +141,7 @@ immediately; connect via `/panes/{id}/stream` to receive live updates.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `cols` | int32 | ✓ |  |
+| `group` | string | — | Process group tag |
 | `id` | uuid | ✓ | Unique pane identifier |
 | `name` | string | — | Human-readable label, if provided at creation |
 | `rows` | int32 | ✓ |  |
@@ -145,6 +166,32 @@ Any connected WebSocket subscribers will receive a `Closed` error.
 | Status | Description |
 |--------|-------------|
 | `204` | Pane killed and removed |
+| `400` | Pane name is ambiguous |
+| `404` | Pane not found |
+
+---
+
+### `PUT /panes/{id}/group`
+
+Update the group of a pane.
+
+**Path Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `id` | string | Pane ID or unique pane name |
+
+**Request Body** (`application/json`)
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `group` | string | — | New group name, or null to clear the group |
+
+**Responses**
+
+| Status | Description |
+|--------|-------------|
+| `204` | Group updated |
 | `400` | Pane name is ambiguous |
 | `404` | Pane not found |
 
@@ -337,6 +384,7 @@ Request body for creating a new pane.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `cols` | int32 | — | Terminal width in columns (default: server-configured default, initially 220) |
+| `group` | string | — | Process group tag (e.g. domain name) |
 | `name` | string | — | Human-readable label for this pane (optional) |
 | `rows` | int32 | — | Terminal height in rows (default: server-configured default, initially 50) |
 | `shell` | string | — | Shell executable path (default: /bin/bash) |
@@ -348,9 +396,18 @@ Created pane descriptor.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `cols` | int32 | ✓ |  |
+| `group` | string | — | Process group tag |
 | `id` | uuid | ✓ | Unique pane identifier |
 | `name` | string | — | Human-readable label, if provided at creation |
 | `rows` | int32 | ✓ |  |
+
+### `GroupUpdateRequest`
+
+Request body for updating a pane's group.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `group` | string | — | New group name, or null to clear the group |
 
 ### `EventResponse`
 
@@ -377,6 +434,7 @@ Summary of an active pane.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `cols` | int32 | ✓ |  |
+| `group` | string | — | Process group tag (e.g. domain name) |
 | `id` | uuid | ✓ | Unique pane identifier |
 | `idle_seconds` | int64 | ✓ | Seconds since the last pane activity (input or PTY output) |
 | `name` | string | — | Human-readable label, if provided at creation |

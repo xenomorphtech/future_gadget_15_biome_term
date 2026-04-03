@@ -14,6 +14,8 @@ defmodule TerminalUiWeb.TerminalLive do
     socket =
       assign(socket,
         panes: [],
+        groups: [],
+        selected_group: nil,
         pane_buffers: %{},
         selected_pane_id: nil,
         screen: nil,
@@ -52,6 +54,16 @@ defmodule TerminalUiWeb.TerminalLive do
     end
 
     {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("select_group", %{"group" => "all"}, socket) do
+    {:noreply, socket |> assign(:selected_group, nil) |> refresh_panes()}
+  end
+
+  @impl true
+  def handle_event("select_group", %{"group" => group}, socket) do
+    {:noreply, socket |> assign(:selected_group, group) |> refresh_panes()}
   end
 
   @impl true
@@ -265,8 +277,18 @@ defmodule TerminalUiWeb.TerminalLive do
   end
 
   defp refresh_panes(socket) do
+    all_panes = TerminalClient.list_panes()
+    groups = all_panes |> Enum.map(& &1["group"]) |> Enum.reject(&is_nil/1) |> Enum.uniq() |> Enum.sort()
+
+    filtered_panes =
+      case socket.assigns.selected_group do
+        nil -> all_panes
+        group -> Enum.filter(all_panes, &(&1["group"] == group))
+      end
+
     socket
-    |> sync_panes(TerminalClient.list_panes())
+    |> assign(:groups, groups)
+    |> sync_panes(filtered_panes)
     |> refresh_pane_buffer_idle()
   end
 
@@ -444,6 +466,8 @@ defmodule TerminalUiWeb.TerminalLive do
   defp pane_display_name(pane) do
     pane["name"] || String.slice(pane["id"], 0, 8) <> "…"
   end
+
+  defp pane_group(pane), do: pane["group"]
 
   defp ensure_valid_selection(socket) do
     case socket.assigns.panes do

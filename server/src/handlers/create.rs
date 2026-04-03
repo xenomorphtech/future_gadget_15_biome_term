@@ -15,6 +15,8 @@ use uuid::Uuid;
 pub struct CreatePaneRequest {
     /// Human-readable label for this pane (optional)
     pub name: Option<String>,
+    /// Process group tag (e.g. domain name)
+    pub group: Option<String>,
     /// Terminal width in columns (default: server-configured default, initially 220)
     pub cols: Option<u16>,
     /// Terminal height in rows (default: server-configured default, initially 50)
@@ -30,6 +32,8 @@ pub struct CreatePaneResponse {
     pub id: Uuid,
     /// Human-readable label, if provided at creation
     pub name: Option<String>,
+    /// Process group tag
+    pub group: Option<String>,
     pub cols: u16,
     pub rows: u16,
 }
@@ -62,10 +66,12 @@ pub async fn create_pane_handler(
     .map_err(AppError::BadRequest)?;
 
     let max_events = state.get_default_max_events();
-    let pane = create_pane(size, body.shell, body.name, max_events).map_err(AppError::Internal)?;
+    let pane =
+        create_pane(size, body.shell, body.name, body.group, max_events).map_err(AppError::Internal)?;
 
     let id = pane.id;
     let name = pane.name.clone();
+    let group = pane.group();
     let pane_info = PaneInfo::from_pane(&pane);
     state.panes.insert(id, pane);
     let _ = state
@@ -75,6 +81,7 @@ pub async fn create_pane_handler(
     Ok(Json(CreatePaneResponse {
         id,
         name,
+        group,
         cols: size.cols,
         rows: size.rows,
     }))

@@ -19,6 +19,34 @@
         + New
       </button>
     </form>
+    <%= if @groups != [] do %>
+      <div class="flex flex-wrap gap-1 p-2 border-b border-gray-700">
+        <button
+          phx-click="select_group"
+          phx-value-group="all"
+          class={
+            if is_nil(@selected_group),
+              do: "text-[11px] font-semibold px-2 py-0.5 rounded bg-blue-600 text-white",
+              else: "text-[11px] font-semibold px-2 py-0.5 rounded bg-gray-700 text-gray-300 hover:bg-gray-600"
+          }
+        >
+          All
+        </button>
+        <%= for group <- @groups do %>
+          <button
+            phx-click="select_group"
+            phx-value-group={group}
+            class={
+              if @selected_group == group,
+                do: "text-[11px] font-semibold px-2 py-0.5 rounded bg-blue-600 text-white",
+                else: "text-[11px] font-semibold px-2 py-0.5 rounded bg-gray-700 text-gray-300 hover:bg-gray-600"
+            }
+          >
+            {group}
+          </button>
+        <% end %>
+      </div>
+    <% end %>
     <ul class="flex-1 overflow-y-auto py-1">
       <%= for pane <- @panes do %>
         <li class="flex items-center group">
@@ -35,11 +63,18 @@
               <span class="min-w-0 truncate">
                 {if pane["terminated"], do: "✗ ", else: ""}{pane_display_name(pane)}
               </span>
-              <%= if show_idle_badge?(pane, @pane_buffers) do %>
-                <span class="shrink-0 text-[11px] font-semibold text-amber-300">
-                  {pane_idle_seconds(@pane_buffers, pane["id"])}s
-                </span>
-              <% end %>
+              <span class="flex items-center gap-1 shrink-0">
+                <%= if pane_group(pane) && is_nil(@selected_group) do %>
+                  <span class="text-[10px] font-medium px-1.5 py-0 rounded bg-gray-600 text-gray-300">
+                    {pane_group(pane)}
+                  </span>
+                <% end %>
+                <%= if show_idle_badge?(pane, @pane_buffers) do %>
+                  <span class="text-[11px] font-semibold text-amber-300">
+                    {pane_idle_seconds(@pane_buffers, pane["id"])}s
+                  </span>
+                <% end %>
+              </span>
             </span>
           </button>
           <button

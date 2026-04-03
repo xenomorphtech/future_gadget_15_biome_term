@@ -24,6 +24,7 @@ impl PaneSize {
 pub struct Pane {
     pub id: Uuid,
     pub name: Option<String>,
+    pub group: Arc<StdRwLock<Option<String>>>,
     pub master: Arc<tokio::sync::Mutex<Box<dyn MasterPty + Send>>>,
     pub writer: Arc<tokio::sync::Mutex<Box<dyn Write + Send>>>,
     /// Child process — wrapped in Arc<Mutex<Option>> so both the read loop
@@ -49,12 +50,21 @@ impl Pane {
     pub fn set_size(&self, size: PaneSize) {
         *self.size.write().unwrap_or_else(|e| e.into_inner()) = size;
     }
+
+    pub fn group(&self) -> Option<String> {
+        self.group.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    pub fn set_group(&self, group: Option<String>) {
+        *self.group.write().unwrap_or_else(|e| e.into_inner()) = group;
+    }
 }
 
 pub fn create_pane(
     size: PaneSize,
     shell: Option<String>,
     name: Option<String>,
+    group: Option<String>,
     max_events: usize,
 ) -> Result<Arc<Pane>, String> {
     let size = size.validate()?;
@@ -105,6 +115,7 @@ pub fn create_pane(
     let pane = Arc::new(Pane {
         id,
         name,
+        group: Arc::new(StdRwLock::new(group)),
         master,
         writer,
         child: Arc::new(Mutex::new(Some(child))),

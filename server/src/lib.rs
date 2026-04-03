@@ -10,7 +10,7 @@ pub mod state;
 use auth::require_api_key;
 use axum::{
     middleware,
-    routing::{delete, get, patch, post},
+    routing::{delete, get, patch, post, put},
     Json, Router,
 };
 use handlers::{
@@ -18,9 +18,10 @@ use handlers::{
     create::create_pane_handler,
     delete::delete_pane_handler,
     events::get_events_handler,
+    group::update_group_handler,
     input::send_input_handler,
     lifecycle::ws_pane_lifecycle_handler,
-    list::list_panes_handler,
+    list::{list_groups_handler, list_panes_handler},
     resize::resize_pane_handler,
     screen::get_screen_handler,
     stream::ws_stream_handler,
@@ -37,7 +38,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/panes", post(create_pane_handler))
         .route("/panes", get(list_panes_handler))
         .route("/panes/lifecycle", get(ws_pane_lifecycle_handler))
+        .route("/groups", get(list_groups_handler))
         .route("/panes/{id}", delete(delete_pane_handler))
+        .route("/panes/{id}/group", put(update_group_handler))
         .route("/panes/{id}/input", post(send_input_handler))
         .route("/panes/{id}/resize", post(resize_pane_handler))
         .route("/panes/{id}/screen", get(get_screen_handler))

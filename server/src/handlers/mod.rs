@@ -2,6 +2,7 @@ pub mod config;
 pub mod create;
 pub mod delete;
 pub mod events;
+pub mod group;
 pub mod input;
 pub mod lifecycle;
 pub mod list;
