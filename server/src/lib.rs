@@ -13,6 +13,7 @@ use axum::{
     routing::{delete, get, patch, post, put},
     Json, Router,
 };
+use error::AppError;
 use handlers::{
     config::{get_config_handler, update_config_handler},
     create::create_pane_handler,
@@ -54,13 +55,17 @@ pub fn build_router(state: AppState) -> Router {
         .with_state(state)
 }
 
-static OPENAPI_JSON: LazyLock<serde_json::Value> = LazyLock::new(|| {
+static OPENAPI_JSON: LazyLock<Result<serde_json::Value, String>> = LazyLock::new(|| {
     let json_str = ApiDoc::openapi()
         .to_pretty_json()
-        .expect("OpenAPI schema serialization failed");
-    serde_json::from_str(&json_str).expect("OpenAPI schema is not valid JSON")
+        .map_err(|error| format!("OpenAPI schema serialization failed: {error}"))?;
+    serde_json::from_str(&json_str)
+        .map_err(|error| format!("OpenAPI schema is not valid JSON: {error}"))
 });
 
-async fn openapi_handler() -> Json<serde_json::Value> {
-    Json(OPENAPI_JSON.clone())
+async fn openapi_handler() -> Result<Json<serde_json::Value>, AppError> {
+    match &*OPENAPI_JSON {
+        Ok(value) => Ok(Json(value.clone())),
+        Err(error) => Err(AppError::Internal(error.clone())),
+    }
 }

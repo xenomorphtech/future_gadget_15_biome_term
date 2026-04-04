@@ -3,18 +3,20 @@
 /// Run from the server/ directory:
 ///   cargo run --bin gen-docs
 use serde_json::Value;
+use std::error::Error;
 use terminal_server::openapi::ApiDoc;
 use utoipa::OpenApi;
 
-fn main() {
-    let json = ApiDoc::openapi().to_pretty_json().unwrap();
-    let spec: Value = serde_json::from_str(&json).unwrap();
+fn main() -> Result<(), Box<dyn Error>> {
+    let json = ApiDoc::openapi().to_pretty_json()?;
+    let spec: Value = serde_json::from_str(&json)?;
 
     let md = render_markdown(&spec);
 
     let out_path = "../docs/api.md";
-    std::fs::write(out_path, &md).unwrap();
+    std::fs::write(out_path, &md)?;
     println!("Written to {out_path}");
+    Ok(())
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
