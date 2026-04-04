@@ -181,13 +181,14 @@ fn spawn_pty_read_loop(
                     };
                     let _ = tx.send(event);
                 }
-                Err(e) => {
-                    // EIO is normal when child exits
-                    if e.raw_os_error() != Some(libc::EIO) {
-                        eprintln!("PTY read error: {e}");
+                Err(error) => match classify_read_error(&error) {
+                    PtyReadAction::Continue => continue,
+                    PtyReadAction::BreakSilently => break,
+                    PtyReadAction::BreakWithLog => {
+                        eprintln!("PTY read error: {error}");
+                        break;
                     }
-                    break;
-                }
+                },
             }
         }
         terminated.store(true, Ordering::Relaxed);
@@ -248,4 +249,47 @@ fn kill_child_process(child_pid: Option<u32>, signal: libc::c_int) -> Result<(),
     }
 
     Err(format!("kill({pid}, {signal}) failed: {error}"))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PtyReadAction {
+    Continue,
+    BreakSilently,
+    BreakWithLog,
+}
+
+fn classify_read_error(error: &io::Error) -> PtyReadAction {
+    if error.kind() == io::ErrorKind::Interrupted {
+        return PtyReadAction::Continue;
+    }
+
+    if error.raw_os_error() == Some(libc::EIO) {
+        return PtyReadAction::BreakSilently;
+    }
+
+    PtyReadAction::BreakWithLog
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{classify_read_error, PtyReadAction};
+    use std::io;
+
+    #[test]
+    fn classify_read_error_retries_interrupted_reads() {
+        let error = io::Error::new(io::ErrorKind::Interrupted, "signal");
+        assert_eq!(classify_read_error(&error), PtyReadAction::Continue);
+    }
+
+    #[test]
+    fn classify_read_error_treats_eio_as_normal_shutdown() {
+        let error = io::Error::from_raw_os_error(libc::EIO);
+        assert_eq!(classify_read_error(&error), PtyReadAction::BreakSilently);
+    }
+
+    #[test]
+    fn classify_read_error_logs_other_failures() {
+        let error = io::Error::other("boom");
+        assert_eq!(classify_read_error(&error), PtyReadAction::BreakWithLog);
+    }
 }

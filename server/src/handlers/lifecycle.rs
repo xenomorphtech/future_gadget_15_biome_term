@@ -21,11 +21,8 @@ async fn handle_ws(socket: WebSocket, state: AppState) {
     let (mut ws_tx, mut ws_rx) = socket.split();
     let mut lifecycle_rx = state.pane_lifecycle_tx.subscribe();
 
-    let snapshot = PaneLifecycleEvent::Snapshot {
-        panes: list_pane_infos(&state),
-    };
-
-    if send_event(&mut ws_tx, &snapshot).await.is_err() {
+    if let Err(error) = send_snapshot(&mut ws_tx, &state).await {
+        eprintln!("Failed to send pane lifecycle snapshot: {error}");
         return;
     }
 
@@ -34,20 +31,35 @@ async fn handle_ws(socket: WebSocket, state: AppState) {
             result = lifecycle_rx.recv() => {
                 match result {
                     Ok(event) => {
-                        if send_event(&mut ws_tx, &event).await.is_err() {
+                        if let Err(error) = send_event(&mut ws_tx, &event).await {
+                            eprintln!("Failed to send pane lifecycle event: {error}");
                             break;
                         }
                     }
                     Err(RecvError::Lagged(n)) => {
                         eprintln!("Pane lifecycle WS client lagged by {n} events");
+                        if let Err(error) = send_snapshot(&mut ws_tx, &state).await {
+                            eprintln!("Failed to send pane lifecycle resync snapshot: {error}");
+                            break;
+                        }
                     }
                     Err(RecvError::Closed) => break,
                 }
             }
             msg = ws_rx.next() => {
                 match msg {
-                    None | Some(Err(_)) => break,
+                    None => break,
+                    Some(Err(error)) => {
+                        eprintln!("Pane lifecycle WS receive error: {error}");
+                        break;
+                    }
                     Some(Ok(Message::Close(_))) => break,
+                    Some(Ok(Message::Ping(payload))) => {
+                        if let Err(error) = ws_tx.send(Message::Pong(payload)).await {
+                            eprintln!("Failed to send pane lifecycle WS pong: {error}");
+                            break;
+                        }
+                    }
                     Some(Ok(_)) => {}
                 }
             }
@@ -55,14 +67,25 @@ async fn handle_ws(socket: WebSocket, state: AppState) {
     }
 }
 
+async fn send_snapshot(
+    ws_tx: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    state: &AppState,
+) -> Result<(), String> {
+    let snapshot = PaneLifecycleEvent::Snapshot {
+        panes: list_pane_infos(state),
+    };
+    send_event(ws_tx, &snapshot).await
+}
+
 async fn send_event(
     ws_tx: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     event: &PaneLifecycleEvent,
-) -> Result<(), ()> {
-    let payload = serde_json::to_string(event).map_err(|_| ())?;
+) -> Result<(), String> {
+    let payload = serde_json::to_string(event)
+        .map_err(|error| format!("failed to serialize lifecycle event: {error}"))?;
 
     ws_tx
         .send(Message::Text(payload.into()))
         .await
-        .map_err(|_| ())
+        .map_err(|error| format!("failed to write lifecycle websocket frame: {error}"))
 }

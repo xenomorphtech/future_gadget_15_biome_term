@@ -1,4 +1,4 @@
-use crate::{error::AppError, pane::Pane, state::AppState};
+use crate::{error::AppError, event::Event, pane::Pane, state::AppState};
 use axum::extract::ws::{Message, WebSocket};
 use axum::{
     extract::{Path, State, WebSocketUpgrade},
@@ -55,21 +55,14 @@ async fn handle_ws(socket: WebSocket, pane: Arc<Pane>) {
     let mut broadcast_rx = pane.broadcast_tx.subscribe();
 
     // Send all historical events first
-    {
+    let history = {
         let log = pane.event_log.read().await;
-        for event in log.since(0) {
-            let msg = json!({
-                "seq": event.seq,
-                "timestamp_ms": event.timestamp_ms,
-                "data": STANDARD.encode(&event.data),
-            });
-            if ws_tx
-                .send(Message::Text(msg.to_string().into()))
-                .await
-                .is_err()
-            {
-                return;
-            }
+        log.since(0)
+    };
+    for event in history {
+        if let Err(error) = send_output_event(&mut ws_tx, &event).await {
+            eprintln!("Failed to send pane stream history event: {error}");
+            return;
         }
     }
 
@@ -79,16 +72,8 @@ async fn handle_ws(socket: WebSocket, pane: Arc<Pane>) {
             result = broadcast_rx.recv() => {
                 match result {
                     Ok(event) => {
-                        let msg = json!({
-                            "seq": event.seq,
-                            "timestamp_ms": event.timestamp_ms,
-                            "data": STANDARD.encode(&event.data),
-                        });
-                        if ws_tx
-                            .send(Message::Text(msg.to_string().into()))
-                            .await
-                            .is_err()
-                        {
+                        if let Err(error) = send_output_event(&mut ws_tx, event.as_ref()).await {
+                            eprintln!("Failed to send pane stream event: {error}");
                             break;
                         }
                     }
@@ -101,11 +86,11 @@ async fn handle_ws(socket: WebSocket, pane: Arc<Pane>) {
                             "type": "snapshot",
                             "screen": contents,
                         });
-                        if ws_tx
+                        if let Err(error) = ws_tx
                             .send(Message::Text(snapshot_msg.to_string().into()))
                             .await
-                            .is_err()
                         {
+                            eprintln!("Failed to send pane stream snapshot: {error}");
                             break;
                         }
                     }
@@ -114,11 +99,37 @@ async fn handle_ws(socket: WebSocket, pane: Arc<Pane>) {
             }
             msg = ws_rx.next() => {
                 match msg {
-                    None | Some(Err(_)) => break,
+                    None => break,
+                    Some(Err(error)) => {
+                        eprintln!("Pane stream WS receive error: {error}");
+                        break;
+                    }
                     Some(Ok(Message::Close(_))) => break,
-                    Some(Ok(_)) => {} // ignore pings/text from client
+                    Some(Ok(Message::Ping(payload))) => {
+                        if let Err(error) = ws_tx.send(Message::Pong(payload)).await {
+                            eprintln!("Failed to send pane stream WS pong: {error}");
+                            break;
+                        }
+                    }
+                    Some(Ok(_)) => {} // ignore pongs/text/binary from client
                 }
             }
         }
     }
+}
+
+async fn send_output_event(
+    ws_tx: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    event: &Event,
+) -> Result<(), String> {
+    let msg = json!({
+        "seq": event.seq,
+        "timestamp_ms": event.timestamp_ms,
+        "data": STANDARD.encode(&event.data),
+    });
+
+    ws_tx
+        .send(Message::Text(msg.to_string().into()))
+        .await
+        .map_err(|error| format!("failed to write stream websocket frame: {error}"))
 }
