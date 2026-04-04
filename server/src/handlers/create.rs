@@ -66,8 +66,8 @@ pub async fn create_pane_handler(
     .map_err(AppError::BadRequest)?;
 
     let max_events = state.get_default_max_events();
-    let pane =
-        create_pane(size, body.shell, body.name, body.group, max_events).map_err(AppError::Internal)?;
+    let pane = create_pane(size, body.shell, body.name, body.group, max_events)
+        .map_err(AppError::Internal)?;
 
     let id = pane.id;
     let name = pane.name.clone();

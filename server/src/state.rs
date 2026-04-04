@@ -41,11 +41,7 @@ impl AppState {
 
     pub fn with_api_key(api_key: Option<String>) -> Self {
         let (pane_lifecycle_tx, _) = broadcast::channel(1024);
-
-        let max_events = env::var("BIOME_DEFAULT_MAX_EVENTS")
-            .ok()
-            .and_then(|v| v.parse::<usize>().ok())
-            .unwrap_or(DEFAULT_MAX_EVENTS);
+        let max_events = default_max_events_from_env();
 
         AppState {
             panes: Arc::new(PaneMap::new()),
@@ -132,4 +128,56 @@ fn normalize_optional_string(value: Option<String>) -> Option<String> {
             Some(trimmed.to_string())
         }
     })
+}
+
+fn default_max_events_from_env() -> usize {
+    match env::var("BIOME_DEFAULT_MAX_EVENTS") {
+        Ok(value) => match parse_default_max_events(&value) {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                eprintln!(
+                    "Ignoring invalid BIOME_DEFAULT_MAX_EVENTS={value:?}: {error}; using default {DEFAULT_MAX_EVENTS}"
+                );
+                DEFAULT_MAX_EVENTS
+            }
+        },
+        Err(env::VarError::NotPresent) => DEFAULT_MAX_EVENTS,
+        Err(error) => {
+            eprintln!(
+                "Failed to read BIOME_DEFAULT_MAX_EVENTS: {error}; using default {DEFAULT_MAX_EVENTS}"
+            );
+            DEFAULT_MAX_EVENTS
+        }
+    }
+}
+
+fn parse_default_max_events(value: &str) -> Result<usize, String> {
+    match value.parse::<usize>() {
+        Ok(0) => Err("value must be >= 1".to_string()),
+        Ok(parsed) => Ok(parsed),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_default_max_events;
+
+    #[test]
+    fn parse_default_max_events_rejects_zero() {
+        assert_eq!(
+            parse_default_max_events("0"),
+            Err("value must be >= 1".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_default_max_events_rejects_invalid_input() {
+        assert!(parse_default_max_events("abc").is_err());
+    }
+
+    #[test]
+    fn parse_default_max_events_accepts_positive_values() {
+        assert_eq!(parse_default_max_events("2048"), Ok(2048));
+    }
 }

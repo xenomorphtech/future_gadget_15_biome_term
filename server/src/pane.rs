@@ -1,6 +1,6 @@
 use crate::event::{now_ms, Event, EventLog};
 use portable_pty::{Child, CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem};
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock as StdRwLock};
 use tokio::sync::{broadcast, RwLock};
@@ -57,6 +57,14 @@ impl Pane {
 
     pub fn set_group(&self, group: Option<String>) {
         *self.group.write().unwrap_or_else(|e| e.into_inner()) = group;
+    }
+
+    pub fn kill_process(&self, signal: libc::c_int) -> Result<(), String> {
+        kill_child_process(self.child_pid, signal)
+    }
+
+    pub fn take_child(&self) -> Option<Box<dyn Child + Send + Sync>> {
+        take_child(&self.child)
     }
 }
 
@@ -185,9 +193,7 @@ fn spawn_pty_read_loop(
         terminated.store(true, Ordering::Relaxed);
         // Reap the child (calls waitpid) to avoid zombie processes.
         // If delete_pane already took it, take() returns None — that's fine.
-        if let Ok(mut guard) = child.lock() {
-            drop(guard.take());
-        }
+        drop(take_child(&child));
     });
 }
 
@@ -213,4 +219,33 @@ pub async fn resize_pane(pane: &Pane, size: PaneSize) -> Result<(), String> {
 
     pane.set_size(size);
     Ok(())
+}
+
+fn take_child(
+    child: &Arc<Mutex<Option<Box<dyn Child + Send + Sync>>>>,
+) -> Option<Box<dyn Child + Send + Sync>> {
+    child.lock().unwrap_or_else(|e| e.into_inner()).take()
+}
+
+fn kill_child_process(child_pid: Option<u32>, signal: libc::c_int) -> Result<(), String> {
+    let Some(pid) = child_pid else {
+        return Ok(());
+    };
+
+    let pid = pid as libc::pid_t;
+    if pid <= 0 {
+        return Ok(());
+    }
+
+    let rc = unsafe { libc::kill(pid, signal) };
+    if rc == 0 {
+        return Ok(());
+    }
+
+    let error = io::Error::last_os_error();
+    if error.raw_os_error() == Some(libc::ESRCH) {
+        return Ok(());
+    }
+
+    Err(format!("kill({pid}, {signal}) failed: {error}"))
 }

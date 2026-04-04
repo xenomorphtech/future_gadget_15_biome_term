@@ -1,6 +1,6 @@
 use crate::{event::now_ms, pane::Pane, state::AppState};
-use axum::{extract::State, Json};
 use axum::extract::Query;
+use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::sync::atomic::Ordering;

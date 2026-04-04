@@ -91,7 +91,8 @@ async fn serve_https(
 ) -> io::Result<()> {
     let listen_addr = tls.listen_addr.clone();
     let rustls_config = RustlsConfig::from_pem_file(&tls.cert_path, &tls.key_path).await?;
-    let socket_addr = resolve_socket_addr(tokio::net::lookup_host(&listen_addr).await?, &listen_addr)?;
+    let socket_addr =
+        resolve_socket_addr(tokio::net::lookup_host(&listen_addr).await?, &listen_addr)?;
     let handle = Handle::new();
     let shutdown_handle = handle.clone();
 
@@ -147,17 +148,10 @@ fn shutdown_panes(state: &AppState) {
     println!("Shutting down: killing {} pane(s)", state.panes.len());
     for entry in state.panes.iter() {
         let pane = entry.value();
-        if let Some(pid) = pane.child_pid {
-            let pid = pid as libc::pid_t;
-            if pid > 0 {
-                unsafe {
-                    libc::kill(pid, libc::SIGKILL);
-                }
-            }
+        if let Err(error) = pane.kill_process(libc::SIGKILL) {
+            eprintln!("Failed to kill pane {} during shutdown: {error}", pane.id);
         }
-        if let Ok(mut guard) = pane.child.lock() {
-            drop(guard.take());
-        }
+        drop(pane.take_child());
     }
     println!("Shutdown complete");
 }
@@ -252,7 +246,11 @@ fn raise_nofile_limit() {
 }
 
 fn resolve_port(listen_addr: &str, env_name: &str) -> io::Result<u16> {
-    Ok(resolve_socket_addr(listen_addr.to_socket_addrs()?, &format!("{env_name}: {listen_addr}"))?.port())
+    Ok(resolve_socket_addr(
+        listen_addr.to_socket_addrs()?,
+        &format!("{env_name}: {listen_addr}"),
+    )?
+    .port())
 }
 
 fn resolve_socket_addr(

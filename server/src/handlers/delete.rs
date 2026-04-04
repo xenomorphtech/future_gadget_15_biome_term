@@ -26,25 +26,21 @@ pub async fn delete_pane_handler(
 ) -> Result<StatusCode, AppError> {
     let (id, pane) = state.remove_pane(&id)?;
 
+    // SIGKILL: cannot be caught or ignored; ensures bash exits even in
+    // interactive mode (which ignores SIGTERM). When bash exits, the slave
+    // PTY fd closes, which unblocks the spawn_blocking reader with EIO.
+    if let Err(error) = pane.kill_process(libc::SIGKILL) {
+        state.panes.insert(id, pane);
+        return Err(AppError::Internal(error));
+    }
+
     let _ = state
         .pane_lifecycle_tx
         .send(PaneLifecycleEvent::Deleted { id });
 
-    // SIGKILL: cannot be caught or ignored; ensures bash exits even in
-    // interactive mode (which ignores SIGTERM). When bash exits, the slave
-    // PTY fd closes, which unblocks the spawn_blocking reader with EIO.
-    if let Some(pid) = pane.child_pid {
-        let pid = pid as libc::pid_t;
-        if pid > 0 {
-            unsafe {
-                libc::kill(pid, libc::SIGKILL);
-            }
-        }
-    }
-
     // Take the child out of the Option (synchronous std::sync::Mutex — no await)
     // then drop it on a blocking thread, because Child::drop calls waitpid().
-    let child = pane.child.lock().unwrap_or_else(|e| e.into_inner()).take();
+    let child = pane.take_child();
     if let Some(child) = child {
         tokio::task::spawn_blocking(move || drop(child));
     }
