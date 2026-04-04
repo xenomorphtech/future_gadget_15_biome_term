@@ -26,6 +26,12 @@ pub struct AppState {
     pub default_pane_size: Arc<RwLock<PaneSize>>,
 }
 
+impl Default for AppState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AppState {
     pub fn new() -> Self {
         Self::with_api_key(None)

@@ -16,6 +16,12 @@ pub struct EventLog {
     max_events: usize,
 }
 
+impl Default for EventLog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EventLog {
     pub fn new() -> Self {
         Self::with_max_events(DEFAULT_MAX_EVENTS)
