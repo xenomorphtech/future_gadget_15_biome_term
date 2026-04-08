@@ -1,7 +1,7 @@
 mod client;
 pub mod types;
 
-pub use client::{BiomeTermClient, BiomeTermClientBuilder};
+pub use client::{BiomeTermClient, BiomeTermClientBuilder, PaneStreamFormat};
 pub use types::{CreatePaneOptions, Event, LifecycleEvent, PaneInfo, ScreenResponse};
 
 #[derive(Debug, thiserror::Error)]

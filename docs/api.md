@@ -333,11 +333,23 @@ Upgrades the connection to a WebSocket. Historical events are sent first
 (subscribe before reading history avoids a race), then new events are
 forwarded in real time.
 
+**Query Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `format` | string | Stream format: `raw` (default) or `screen_diff` for native framebuffer diffs |
+
 **Frame format** (text, JSON):
 ```json
 { "seq": 42, "timestamp_ms": 1700000000000, "data": "<base64>" }
 ```
 `data` is base64-encoded raw PTY output bytes.
+If a subscriber falls behind, the server may inject a synthetic recovery frame
+with the same shape plus `"resync": true`; applying those bytes restores the
+current authoritative screen state before live streaming resumes.
+When `format=screen_diff`, the server replays raw history once, sends a full
+resync frame, then streams `vt100` framebuffer diffs instead of original PTY
+bytes for subsequent live updates.
 
 **Path Parameters**
 
@@ -461,4 +473,3 @@ Authoritative VT100 screen state of a pane.
 | `num_cols` | int32 | ✓ |  |
 | `num_rows` | int32 | ✓ |  |
 | `rows` | string[] | ✓ | One string per terminal row, trailing whitespace trimmed |
-

@@ -1,7 +1,8 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     fs,
     sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
 
 use biome_term_client::{
@@ -19,7 +20,11 @@ const DARK_GREEN: egui::Color32 = egui::Color32::from_rgb(0, 32, 0);
 
 enum Msg {
     PanesUpdated(Vec<PaneInfo>),
-    PaneOutput,
+    PaneOutput {
+        pane_id: String,
+        bytes: usize,
+        received_at: Instant,
+    },
     Error(String),
 }
 
@@ -28,6 +33,7 @@ enum Msg {
 struct PaneState {
     parser: Arc<Mutex<vt100::Parser>>,
     task: tokio::task::JoinHandle<()>,
+    throughput: ThroughputWindow,
 }
 
 #[derive(Clone)]
@@ -36,6 +42,42 @@ struct ConnectionSettings {
     api_key: String,
     ca_cert_path: String,
     insecure_tls: bool,
+}
+
+#[derive(Default)]
+struct ThroughputWindow {
+    samples: VecDeque<(Instant, usize)>,
+    total_bytes: usize,
+}
+
+impl ThroughputWindow {
+    const WINDOW: Duration = Duration::from_secs(5);
+
+    fn record(&mut self, now: Instant, bytes: usize) {
+        if bytes == 0 {
+            self.prune(now);
+            return;
+        }
+
+        self.samples.push_back((now, bytes));
+        self.total_bytes += bytes;
+        self.prune(now);
+    }
+
+    fn bytes_per_second(&mut self, now: Instant) -> f64 {
+        self.prune(now);
+        self.total_bytes as f64 / Self::WINDOW.as_secs_f64()
+    }
+
+    fn prune(&mut self, now: Instant) {
+        while let Some((sample_at, sample_bytes)) = self.samples.front().copied() {
+            if now.duration_since(sample_at) <= Self::WINDOW {
+                break;
+            }
+            self.samples.pop_front();
+            self.total_bytes = self.total_bytes.saturating_sub(sample_bytes);
+        }
+    }
 }
 
 // ── App ───────────────────────────────────────────────────────────────────────
@@ -152,6 +194,7 @@ impl App {
             PaneState {
                 parser,
                 task: handle,
+                throughput: ThroughputWindow::default(),
             },
         );
         self.selected_id = Some(id);
@@ -206,6 +249,10 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         apply_theme(ctx);
+
+        if self.selected_id.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(250));
+        }
 
         if self.terminal_focused
             && ctx.input(|i| i.pointer.primary_clicked())
@@ -283,7 +330,15 @@ impl eframe::App for App {
                     self.panes = panes;
                     self.status.clear();
                 }
-                Msg::PaneOutput => {}
+                Msg::PaneOutput {
+                    pane_id,
+                    bytes,
+                    received_at,
+                } => {
+                    if let Some(state) = self.pane_states.get_mut(&pane_id) {
+                        state.throughput.record(received_at, bytes);
+                    }
+                }
                 Msg::Error(e) => self.status = format!("⚠ {e}"),
             }
         }
@@ -606,7 +661,24 @@ impl eframe::App for App {
             }
 
             if let Some(ref id) = self.selected_id.clone() {
+                let throughput_label = self.selected_pane_throughput_label();
                 if let Some(state) = self.pane_states.get(id) {
+                    ui.horizontal(|ui| {
+                        let pane_label = self
+                            .panes
+                            .iter()
+                            .find(|pane| pane.id == *id)
+                            .and_then(|pane| pane.name.as_deref())
+                            .unwrap_or(&id[..8]);
+                        ui.label(egui::RichText::new(pane_label).small().color(GREEN));
+                        ui.separator();
+                        ui.label(
+                            egui::RichText::new(throughput_label)
+                                .small()
+                                .color(DIM_GREEN),
+                        );
+                    });
+                    ui.add_space(6.0);
                     if let Ok(parser) = state.parser.lock() {
                         render_terminal(ui, &parser, self.font_size, self.terminal_focused);
                     }
@@ -630,6 +702,22 @@ impl eframe::App for App {
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
         BLACK.to_normalized_gamma_f32()
+    }
+}
+
+impl App {
+    fn selected_pane_throughput_label(&mut self) -> String {
+        let Some(selected_id) = self.selected_id.clone() else {
+            return "0 B/s (5s avg)".to_string();
+        };
+
+        let rate = self
+            .pane_states
+            .get_mut(&selected_id)
+            .map(|state| state.throughput.bytes_per_second(Instant::now()))
+            .unwrap_or(0.0);
+
+        format!("{} /s (5s avg)", format_byte_rate(rate))
     }
 }
 
@@ -770,6 +858,27 @@ fn render_terminal(ui: &mut egui::Ui, parser: &vt100::Parser, font_size: f32, fo
                 }
             });
     });
+}
+
+fn format_byte_rate(bytes_per_second: f64) -> String {
+    const UNITS: [&str; 4] = ["B", "KiB", "MiB", "GiB"];
+
+    let mut value = bytes_per_second.max(0.0);
+    let mut unit = UNITS[0];
+
+    for next_unit in UNITS.iter().skip(1) {
+        if value < 1024.0 {
+            break;
+        }
+        value /= 1024.0;
+        unit = next_unit;
+    }
+
+    if unit == "B" {
+        format!("{value:.0} {unit}")
+    } else {
+        format!("{value:.1} {unit}")
+    }
 }
 
 fn resolve_color(color: vt100::Color, default: egui::Color32) -> egui::Color32 {
@@ -1049,7 +1158,7 @@ async fn stream_pane_task(
     tx: std::sync::mpsc::SyncSender<Msg>,
     ctx: egui::Context,
 ) {
-    match client.stream_pane(&id).await {
+    match client.stream_pane_screen_diff(&id).await {
         Err(e) => {
             let _ = tx.send(Msg::Error(e.to_string()));
         }
@@ -1057,8 +1166,13 @@ async fn stream_pane_task(
             while let Some(result) = stream.next().await {
                 match result {
                     Ok(event) => {
+                        let bytes = event.data.len();
                         parser.lock().unwrap().process(&event.data);
-                        let _ = tx.send(Msg::PaneOutput);
+                        let _ = tx.send(Msg::PaneOutput {
+                            pane_id: id.clone(),
+                            bytes,
+                            received_at: Instant::now(),
+                        });
                         ctx.request_repaint();
                     }
                     Err(e) => {
@@ -1098,4 +1212,42 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(move |cc| Ok(Box::new(App::new(cc, settings.clone())))),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{format_byte_rate, ThroughputWindow};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn throughput_window_averages_only_the_last_five_seconds() {
+        let start = Instant::now();
+        let mut window = ThroughputWindow::default();
+
+        window.record(start, 100);
+        window.record(start + Duration::from_secs(2), 50);
+
+        assert_eq!(
+            window.bytes_per_second(start + Duration::from_secs(4)),
+            30.0
+        );
+
+        window.record(start + Duration::from_secs(6), 200);
+
+        assert_eq!(
+            window.bytes_per_second(start + Duration::from_secs(6)),
+            50.0
+        );
+        assert_eq!(
+            window.bytes_per_second(start + Duration::from_secs(12)),
+            0.0
+        );
+    }
+
+    #[test]
+    fn format_byte_rate_uses_binary_units() {
+        assert_eq!(format_byte_rate(999.0), "999 B");
+        assert_eq!(format_byte_rate(2048.0), "2.0 KiB");
+        assert_eq!(format_byte_rate(1_572_864.0), "1.5 MiB");
+    }
 }

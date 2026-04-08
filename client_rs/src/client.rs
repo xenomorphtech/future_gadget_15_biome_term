@@ -22,6 +22,24 @@ use crate::{
     Error,
 };
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PaneStreamFormat {
+    #[default]
+    Raw,
+    ScreenDiff,
+}
+
+impl PaneStreamFormat {
+    fn stream_url(self, ws_base: &str, id: &str) -> String {
+        match self {
+            PaneStreamFormat::Raw => format!("{ws_base}/panes/{id}/stream"),
+            PaneStreamFormat::ScreenDiff => {
+                format!("{ws_base}/panes/{id}/stream?format=screen_diff")
+            }
+        }
+    }
+}
+
 /// Async HTTP + WebSocket client for the biome_term server.
 pub struct BiomeTermClient {
     http: reqwest::Client,
@@ -159,33 +177,42 @@ impl BiomeTermClient {
         &self,
         id: &str,
     ) -> Result<BoxStream<'static, Result<Event, Error>>, Error> {
-        let url = format!("{}/panes/{}/stream", self.ws_base(), id);
+        self.stream_pane_with_format(id, PaneStreamFormat::Raw)
+            .await
+    }
+
+    /// Stream pane updates using the requested transport format.
+    ///
+    /// `PaneStreamFormat::Raw` replays raw PTY bytes. `PaneStreamFormat::ScreenDiff`
+    /// replays raw history once and then switches live updates to framebuffer diffs.
+    pub async fn stream_pane_with_format(
+        &self,
+        id: &str,
+        format: PaneStreamFormat,
+    ) -> Result<BoxStream<'static, Result<Event, Error>>, Error> {
+        let url = format.stream_url(&self.ws_base(), id);
         let request = self.ws_request(url)?;
         let (ws, _) =
             connect_async_tls_with_config(request, None, false, Some(self.ws_connector.clone()))
                 .await?;
         let stream = ws.filter_map(|msg| async move {
             match msg {
-                Ok(Message::Text(txt)) => {
-                    let raw: RawEvent = match serde_json::from_str(&txt) {
-                        Ok(r) => r,
-                        Err(e) => return Some(Err(Error::Json(e))),
-                    };
-                    match STANDARD.decode(&raw.data) {
-                        Ok(data) => Some(Ok(Event {
-                            seq: raw.seq,
-                            timestamp_ms: raw.timestamp_ms,
-                            data,
-                        })),
-                        Err(e) => Some(Err(Error::Base64(e))),
-                    }
-                }
+                Ok(Message::Text(txt)) => Some(decode_stream_event(&txt)),
                 Ok(Message::Close(_)) => None,
                 Ok(_) => None,
                 Err(e) => Some(Err(Error::WebSocket(e))),
             }
         });
         Ok(Box::pin(stream))
+    }
+
+    /// Stream pane updates using framebuffer diffs intended for the native GUI.
+    pub async fn stream_pane_screen_diff(
+        &self,
+        id: &str,
+    ) -> Result<BoxStream<'static, Result<Event, Error>>, Error> {
+        self.stream_pane_with_format(id, PaneStreamFormat::ScreenDiff)
+            .await
     }
 
     /// Stream pane lifecycle events (created / deleted) via WebSocket.
@@ -247,6 +274,53 @@ impl BiomeTermClient {
         } else {
             Err(Error::Server(format!("{status}: {body}")))
         }
+    }
+}
+
+fn decode_stream_event(txt: &str) -> Result<Event, Error> {
+    let raw: RawEvent = serde_json::from_str(txt)?;
+    Ok(Event {
+        seq: raw.seq,
+        timestamp_ms: raw.timestamp_ms,
+        data: STANDARD.decode(&raw.data)?,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decode_stream_event, PaneStreamFormat};
+
+    #[test]
+    fn decode_stream_event_accepts_regular_event_frames() {
+        let event =
+            decode_stream_event(r#"{"seq":7,"timestamp_ms":123,"data":"aGVsbG8="}"#).unwrap();
+
+        assert_eq!(event.seq, 7);
+        assert_eq!(event.timestamp_ms, 123);
+        assert_eq!(event.data, b"hello");
+    }
+
+    #[test]
+    fn decode_stream_event_ignores_resync_metadata_on_recovery_frames() {
+        let event =
+            decode_stream_event(r#"{"seq":9,"timestamp_ms":456,"data":"aGVsbG8=","resync":true}"#)
+                .unwrap();
+
+        assert_eq!(event.seq, 9);
+        assert_eq!(event.timestamp_ms, 456);
+        assert_eq!(event.data, b"hello");
+    }
+
+    #[test]
+    fn pane_stream_format_builds_expected_urls() {
+        assert_eq!(
+            PaneStreamFormat::Raw.stream_url("ws://localhost:3021", "pane-1"),
+            "ws://localhost:3021/panes/pane-1/stream"
+        );
+        assert_eq!(
+            PaneStreamFormat::ScreenDiff.stream_url("ws://localhost:3021", "pane-1"),
+            "ws://localhost:3021/panes/pane-1/stream?format=screen_diff"
+        );
     }
 }
 

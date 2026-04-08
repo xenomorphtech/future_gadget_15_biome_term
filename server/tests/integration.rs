@@ -206,6 +206,25 @@ async fn recv_lifecycle_event(
     }
 }
 
+async fn recv_stream_event(
+    ws: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+) -> serde_json::Value {
+    use futures_util::StreamExt;
+
+    loop {
+        match ws.next().await {
+            Some(Ok(tokio_tungstenite::tungstenite::Message::Text(txt))) => {
+                return serde_json::from_str(&txt).unwrap();
+            }
+            Some(Ok(_)) => {}
+            Some(Err(err)) => panic!("websocket error: {err}"),
+            None => panic!("websocket closed unexpectedly"),
+        }
+    }
+}
+
 #[tokio::test]
 async fn test_echo_hello() {
     let base = start_test_server().await;
@@ -326,6 +345,86 @@ async fn test_websocket_stream() {
     assert!(
         output.contains("ws_test"),
         "Expected 'ws_test' in WS stream, got: {output:?}"
+    );
+
+    ws.close(None).await.ok();
+    delete_pane(&client, &base, &id).await;
+}
+
+#[tokio::test]
+async fn test_websocket_screen_diff_stream_reconstructs_screen() {
+    use tokio::time::{timeout, Instant};
+    use tokio_tungstenite::connect_async;
+
+    let base = start_test_server().await;
+    let ws_base = base.replace("http://", "ws://");
+    let client = reqwest::Client::new();
+
+    let id = create_pane(&client, &base).await;
+    sleep(Duration::from_millis(300)).await;
+
+    let ws_url = format!("{ws_base}/panes/{id}/stream?format=screen_diff");
+    let (mut ws, _) = connect_async(&ws_url).await.unwrap();
+    let mut parser = vt100::Parser::new(24, 80, 1000);
+
+    let init_deadline = Instant::now() + Duration::from_secs(3);
+    let mut saw_resync = false;
+    while Instant::now() < init_deadline {
+        let remaining = init_deadline.saturating_duration_since(Instant::now());
+        let frame = timeout(remaining, recv_stream_event(&mut ws))
+            .await
+            .expect("timed out waiting for screen_diff initialization");
+
+        parser.process(
+            &STANDARD
+                .decode(
+                    frame["data"]
+                        .as_str()
+                        .expect("stream frame should include data"),
+                )
+                .expect("stream frame should contain valid base64"),
+        );
+
+        if frame["resync"].as_bool() == Some(true) {
+            saw_resync = true;
+            break;
+        }
+    }
+
+    assert!(
+        saw_resync,
+        "expected screen_diff stream to emit an initial resync frame"
+    );
+
+    send_input(&client, &base, &id, "echo screen_diff_test\n").await;
+
+    let output_deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let screen_contents = parser.screen().contents();
+        if screen_contents.contains("screen_diff_test") {
+            break;
+        }
+
+        let remaining = output_deadline.saturating_duration_since(Instant::now());
+        let frame = timeout(remaining, recv_stream_event(&mut ws))
+            .await
+            .expect("timed out waiting for screen_diff output");
+
+        parser.process(
+            &STANDARD
+                .decode(
+                    frame["data"]
+                        .as_str()
+                        .expect("stream frame should include data"),
+                )
+                .expect("stream frame should contain valid base64"),
+        );
+    }
+
+    let screen_contents = parser.screen().contents();
+    assert!(
+        screen_contents.contains("screen_diff_test"),
+        "expected screen diff stream to reconstruct latest screen, got:\n{screen_contents}"
     );
 
     ws.close(None).await.ok();

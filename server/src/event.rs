@@ -67,6 +67,11 @@ impl EventLog {
     pub fn oldest_seq(&self) -> Option<u64> {
         self.events.front().map(|e| e.seq)
     }
+
+    /// Returns the seq of the newest retained event, or None if empty.
+    pub fn latest_seq(&self) -> Option<u64> {
+        self.events.back().map(|e| e.seq)
+    }
 }
 
 pub fn now_ms() -> u64 {
