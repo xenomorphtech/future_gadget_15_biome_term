@@ -27,7 +27,8 @@
           class={
             if is_nil(@selected_group),
               do: "text-[11px] font-semibold px-2 py-0.5 rounded bg-blue-600 text-white",
-              else: "text-[11px] font-semibold px-2 py-0.5 rounded bg-gray-700 text-gray-300 hover:bg-gray-600"
+              else:
+                "text-[11px] font-semibold px-2 py-0.5 rounded bg-gray-700 text-gray-300 hover:bg-gray-600"
           }
         >
           All
@@ -39,7 +40,8 @@
             class={
               if @selected_group == group,
                 do: "text-[11px] font-semibold px-2 py-0.5 rounded bg-blue-600 text-white",
-                else: "text-[11px] font-semibold px-2 py-0.5 rounded bg-gray-700 text-gray-300 hover:bg-gray-600"
+                else:
+                  "text-[11px] font-semibold px-2 py-0.5 rounded bg-gray-700 text-gray-300 hover:bg-gray-600"
             }
           >
             {group}
@@ -101,7 +103,7 @@
       </form>
     </div>
   </aside>
-  <main class="flex-1 flex flex-col overflow-hidden">
+  <main class="flex-1 min-h-0 flex flex-col overflow-hidden">
     <%= if @snippet_panel_position == "top" do %>
       <.snippet_panel
         selected_pane_id={@selected_pane_id}
@@ -110,7 +112,7 @@
       />
     <% end %>
     <div
-      class="flex-1 overflow-auto bg-black p-2"
+      class="flex-1 min-h-0 overflow-auto bg-black p-2"
       id="terminal-viewport"
       phx-hook="TerminalInput"
       tabindex="0"

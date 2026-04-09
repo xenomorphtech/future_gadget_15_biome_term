@@ -270,7 +270,9 @@ defmodule TerminalUiWeb.TerminalLive do
 
   defp refresh_panes(socket) do
     all_panes = TerminalClient.list_panes()
-    groups = all_panes |> Enum.map(& &1["group"]) |> Enum.reject(&is_nil/1) |> Enum.uniq() |> Enum.sort()
+
+    groups =
+      all_panes |> Enum.map(& &1["group"]) |> Enum.reject(&is_nil/1) |> Enum.uniq() |> Enum.sort()
 
     filtered_panes =
       case socket.assigns.selected_group do
@@ -510,77 +512,75 @@ defmodule TerminalUiWeb.TerminalLive do
       phx-hook="SnippetInput"
       data-history-scope={@selected_pane_id || ""}
       class={[
-        "bg-gray-950 p-3",
+        "shrink-0 bg-gray-950 p-3",
         if(@position == "top", do: "border-b border-gray-800", else: "border-t border-gray-800")
       ]}
     >
-      <div class="flex items-end gap-3">
-        <div class="flex-1">
-          <div class="mb-2 flex items-center justify-between gap-3">
-            <label
-              for="snippet-input"
-              class="block text-xs font-semibold uppercase tracking-wide text-gray-400"
+      <div class="mb-2 flex items-center justify-between gap-3">
+        <label
+          for="snippet-input"
+          class="block text-xs font-semibold uppercase tracking-wide text-gray-400"
+        >
+          Inject Snippet
+        </label>
+        <div class="flex flex-wrap items-center justify-end gap-2">
+          <span class="text-[11px] text-gray-500">Alt+↑ / Alt+↓ history</span>
+          <div class="flex items-center rounded border border-gray-700 p-0.5">
+            <button
+              type="button"
+              phx-click="set_snippet_panel_position"
+              phx-value-position="top"
+              class={
+                if @position == "top" do
+                  "rounded bg-blue-600 px-2 py-1 text-[11px] font-semibold text-white"
+                else
+                  "rounded px-2 py-1 text-[11px] font-semibold text-gray-400 hover:text-gray-200"
+                end
+              }
             >
-              Inject Snippet
-            </label>
-            <div class="flex flex-wrap items-center justify-end gap-2">
-              <span class="text-[11px] text-gray-500">Alt+↑ / Alt+↓ history</span>
-              <div class="flex items-center rounded border border-gray-700 p-0.5">
-                <button
-                  type="button"
-                  phx-click="set_snippet_panel_position"
-                  phx-value-position="top"
-                  class={
-                    if @position == "top" do
-                      "rounded bg-blue-600 px-2 py-1 text-[11px] font-semibold text-white"
-                    else
-                      "rounded px-2 py-1 text-[11px] font-semibold text-gray-400 hover:text-gray-200"
-                    end
-                  }
-                >
-                  Top
-                </button>
-                <button
-                  type="button"
-                  phx-click="set_snippet_panel_position"
-                  phx-value-position="bottom"
-                  class={
-                    if @position == "bottom" do
-                      "rounded bg-blue-600 px-2 py-1 text-[11px] font-semibold text-white"
-                    else
-                      "rounded px-2 py-1 text-[11px] font-semibold text-gray-400 hover:text-gray-200"
-                    end
-                  }
-                >
-                  Bottom
-                </button>
-              </div>
-              <button
-                type="button"
-                data-history-nav="prev"
-                disabled={is_nil(@selected_pane_id)}
-                class="rounded border border-gray-700 px-2 py-1 text-[11px] font-semibold text-gray-300 disabled:cursor-not-allowed disabled:border-gray-800 disabled:text-gray-600"
-              >
-                Prev
-              </button>
-              <button
-                type="button"
-                data-history-nav="next"
-                disabled={is_nil(@selected_pane_id)}
-                class="rounded border border-gray-700 px-2 py-1 text-[11px] font-semibold text-gray-300 disabled:cursor-not-allowed disabled:border-gray-800 disabled:text-gray-600"
-              >
-                Next
-              </button>
-            </div>
+              Top
+            </button>
+            <button
+              type="button"
+              phx-click="set_snippet_panel_position"
+              phx-value-position="bottom"
+              class={
+                if @position == "bottom" do
+                  "rounded bg-blue-600 px-2 py-1 text-[11px] font-semibold text-white"
+                else
+                  "rounded px-2 py-1 text-[11px] font-semibold text-gray-400 hover:text-gray-200"
+                end
+              }
+            >
+              Bottom
+            </button>
           </div>
-          <textarea
-            id="snippet-input"
-            name="snippet"
-            rows="5"
-            class="w-full resize-y rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-            placeholder="Paste multiline input here. It will be sent to the selected pane through the input API."
-          ><%= @snippet %></textarea>
+          <button
+            type="button"
+            data-history-nav="prev"
+            disabled={is_nil(@selected_pane_id)}
+            class="rounded border border-gray-700 px-2 py-1 text-[11px] font-semibold text-gray-300 disabled:cursor-not-allowed disabled:border-gray-800 disabled:text-gray-600"
+          >
+            Prev
+          </button>
+          <button
+            type="button"
+            data-history-nav="next"
+            disabled={is_nil(@selected_pane_id)}
+            class="rounded border border-gray-700 px-2 py-1 text-[11px] font-semibold text-gray-300 disabled:cursor-not-allowed disabled:border-gray-800 disabled:text-gray-600"
+          >
+            Next
+          </button>
         </div>
+      </div>
+      <div class="flex items-start gap-3">
+        <textarea
+          id="snippet-input"
+          name="snippet"
+          rows="5"
+          class="min-h-0 min-w-0 flex-1 resize-y rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+          placeholder="Paste multiline input here. It will be sent to the selected pane through the input API."
+        ><%= @snippet %></textarea>
         <button
           type="submit"
           disabled={is_nil(@selected_pane_id) or @snippet == ""}
