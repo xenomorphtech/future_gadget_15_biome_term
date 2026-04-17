@@ -1,4 +1,4 @@
-<div class="flex h-dvh bg-gray-900 text-gray-100 font-mono">
+<div class="flex h-dvh bg-gray-900 text-gray-100 font-mono" phx-window-keydown="window_keydown">
   <aside class={[
     "bg-gray-800 border-r border-gray-700 flex flex-col transition-all duration-200 overflow-hidden",
     if(@sidebar_open, do: "w-56", else: "w-0 border-r-0")

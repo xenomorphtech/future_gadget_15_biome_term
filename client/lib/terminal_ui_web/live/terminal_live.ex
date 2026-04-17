@@ -63,6 +63,15 @@ defmodule TerminalUiWeb.TerminalLive do
   end
 
   @impl true
+  def handle_event("window_keydown", %{"key" => "b", "ctrlKey" => true}, socket) do
+    {:noreply, assign(socket, :sidebar_open, !socket.assigns.sidebar_open)}
+  end
+
+  def handle_event("window_keydown", _params, socket) do
+    {:noreply, socket}
+  end
+
+  @impl true
   def handle_event("select_group", %{"group" => "all"}, socket) do
     {:noreply, socket |> assign(:selected_group, nil) |> refresh_panes()}
   end
