@@ -21,7 +21,8 @@ defmodule TerminalUiWeb.TerminalLive do
         screen: nil,
         new_pane_name: "",
         snippet: "",
-        snippet_panel_position: "bottom"
+        snippet_panel_position: "bottom",
+        sidebar_open: true
       )
 
     if connected?(socket) do
@@ -54,6 +55,11 @@ defmodule TerminalUiWeb.TerminalLive do
     end
 
     {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("toggle_sidebar", _params, socket) do
+    {:noreply, assign(socket, :sidebar_open, !socket.assigns.sidebar_open)}
   end
 
   @impl true
