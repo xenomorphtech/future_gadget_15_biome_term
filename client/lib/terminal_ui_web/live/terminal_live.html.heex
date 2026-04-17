@@ -1,4 +1,17 @@
 <div class="flex h-dvh bg-gray-900 text-gray-100 font-mono" phx-window-keydown="window_keydown">
+  <button
+    phx-click="toggle_sidebar"
+    class="fixed top-2 left-2 z-50 p-1.5 rounded bg-gray-700 text-gray-400 hover:text-gray-100 hover:bg-gray-600 transition-colors shadow-lg"
+    title={if @sidebar_open, do: "Hide sidebar (Ctrl+B)", else: "Show sidebar (Ctrl+B)"}
+  >
+    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+      <%= if @sidebar_open do %>
+        <path stroke-linecap="round" stroke-linejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+      <% else %>
+        <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+      <% end %>
+    </svg>
+  </button>
   <aside class={[
     "bg-gray-800 border-r border-gray-700 flex flex-col transition-all duration-200 overflow-hidden",
     if(@sidebar_open, do: "w-56", else: "w-0 border-r-0")
@@ -6,7 +19,7 @@
     <form
       phx-change="set_new_pane_name"
       phx-submit="new_pane"
-      class="p-2 border-b border-gray-700 flex gap-1"
+      class="p-2 pt-9 border-b border-gray-700 flex gap-1"
     >
       <input
         type="text"
@@ -107,21 +120,6 @@
     </div>
   </aside>
   <main class="flex-1 min-h-0 flex flex-col overflow-hidden">
-    <div class="flex items-center bg-gray-800 border-b border-gray-700">
-      <button
-        phx-click="toggle_sidebar"
-        class="px-2 py-1.5 text-gray-400 hover:text-gray-100 hover:bg-gray-700 transition-colors"
-        title={if @sidebar_open, do: "Hide sidebar", else: "Show sidebar"}
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <%= if @sidebar_open do %>
-            <path stroke-linecap="round" stroke-linejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
-          <% else %>
-            <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-          <% end %>
-        </svg>
-      </button>
-    </div>
     <%= if @snippet_panel_position == "top" do %>
       <.snippet_panel
         selected_pane_id={@selected_pane_id}
