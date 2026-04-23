@@ -9,6 +9,13 @@ defmodule TerminalUiWeb.TerminalLive do
   @snippet_submit_delay_ms 500
   @idle_badge_threshold_seconds 5
 
+  @default_cols 220
+  @default_rows 50
+  @min_cols 20
+  @max_cols 500
+  @min_rows 5
+  @max_rows 200
+
   @impl true
   def mount(_params, _session, socket) do
     socket =
@@ -22,7 +29,10 @@ defmodule TerminalUiWeb.TerminalLive do
         new_pane_name: "",
         snippet: "",
         snippet_panel_position: "bottom",
-        sidebar_open: true
+        sidebar_open: true,
+        size_settings_open: false,
+        size_settings: default_size_form(),
+        size_settings_error: nil
       )
 
     if connected?(socket) do
@@ -63,8 +73,73 @@ defmodule TerminalUiWeb.TerminalLive do
   end
 
   @impl true
+  def handle_event("open_size_settings", _params, socket) do
+    {cols, rows} = selected_pane_dimensions(socket)
+
+    form = %{
+      "cols" => Integer.to_string(cols),
+      "rows" => Integer.to_string(rows),
+      "scope" => "current"
+    }
+
+    {:noreply,
+     assign(socket,
+       size_settings_open: true,
+       size_settings: form,
+       size_settings_error: nil
+     )}
+  end
+
+  @impl true
+  def handle_event("close_size_settings", _params, socket) do
+    {:noreply, assign(socket, size_settings_open: false, size_settings_error: nil)}
+  end
+
+  @impl true
+  def handle_event("validate_size_settings", params, socket) do
+    {:noreply,
+     assign(socket,
+       size_settings: merge_size_form(socket.assigns.size_settings, params),
+       size_settings_error: nil
+     )}
+  end
+
+  @impl true
+  def handle_event("apply_size_settings", params, socket) do
+    form = merge_size_form(socket.assigns.size_settings, params)
+
+    with {:ok, cols, rows, scope} <- parse_size_form(form),
+         targets = resize_targets(socket, scope),
+         :ok <- apply_resize_to_targets(targets, cols, rows) do
+      {:noreply,
+       socket
+       |> assign(
+         size_settings_open: false,
+         size_settings: form,
+         size_settings_error: nil
+       )
+       |> refresh_terminal_state()}
+    else
+      {:error, message} ->
+        {:noreply,
+         assign(socket,
+           size_settings: form,
+           size_settings_error: message
+         )}
+    end
+  end
+
+  @impl true
   def handle_event("window_keydown", %{"key" => "b", "ctrlKey" => true}, socket) do
     {:noreply, assign(socket, :sidebar_open, !socket.assigns.sidebar_open)}
+  end
+
+  def handle_event("window_keydown", %{"key" => "Escape"}, socket) do
+    if socket.assigns.size_settings_open do
+      {:noreply, assign(socket, size_settings_open: false, size_settings_error: nil)}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_event("window_keydown", _params, socket) do
@@ -200,6 +275,84 @@ defmodule TerminalUiWeb.TerminalLive do
 
   defp normalize_snippet_panel_position("top"), do: "top"
   defp normalize_snippet_panel_position(_position), do: "bottom"
+
+  defp default_size_form do
+    %{
+      "cols" => Integer.to_string(@default_cols),
+      "rows" => Integer.to_string(@default_rows),
+      "scope" => "current"
+    }
+  end
+
+  defp merge_size_form(form, params) do
+    Map.merge(form, Map.take(params, ["cols", "rows", "scope"]))
+  end
+
+  defp selected_pane_dimensions(socket) do
+    selected_id = socket.assigns.selected_pane_id
+
+    pane =
+      selected_id &&
+        Enum.find(socket.assigns.panes, &(&1["id"] == selected_id))
+
+    case pane do
+      %{"cols" => cols, "rows" => rows} when is_integer(cols) and is_integer(rows) ->
+        {cols, rows}
+
+      _ ->
+        {@default_cols, @default_rows}
+    end
+  end
+
+  defp parse_size_form(%{"cols" => cols, "rows" => rows, "scope" => scope}) do
+    with {:ok, c} <- parse_dim(cols, @min_cols, @max_cols, "cols"),
+         {:ok, r} <- parse_dim(rows, @min_rows, @max_rows, "rows"),
+         {:ok, s} <- parse_scope(scope) do
+      {:ok, c, r, s}
+    end
+  end
+
+  defp parse_dim(value, min, max, label) do
+    case Integer.parse(to_string(value)) do
+      {n, ""} when n >= min and n <= max -> {:ok, n}
+      {_n, ""} -> {:error, "#{label} must be between #{min} and #{max}"}
+      _ -> {:error, "#{label} must be a number"}
+    end
+  end
+
+  defp parse_scope("current"), do: {:ok, :current}
+  defp parse_scope("all"), do: {:ok, :all}
+  defp parse_scope(_), do: {:error, "invalid scope"}
+
+  defp resize_targets(socket, :current) do
+    case socket.assigns.selected_pane_id do
+      nil -> []
+      id -> [id]
+    end
+  end
+
+  defp resize_targets(socket, :all) do
+    socket.assigns.panes
+    |> Enum.reject(& &1["terminated"])
+    |> Enum.map(& &1["id"])
+  end
+
+  defp apply_resize_to_targets([], _cols, _rows), do: :ok
+
+  defp apply_resize_to_targets(targets, cols, rows) do
+    Enum.reduce_while(targets, :ok, fn id, _acc ->
+      case TerminalClient.resize_pane(id, cols, rows) do
+        {:ok, %{status: status}} when status in 200..299 ->
+          {:cont, :ok}
+
+        {:ok, %{status: status}} ->
+          {:halt, {:error, "backend rejected resize (HTTP #{status})"}}
+
+        {:error, reason} ->
+          {:halt, {:error, "backend unreachable: #{inspect(reason)}"}}
+      end
+    end)
+  end
 
   defp sync_panes(socket, panes) do
     current_ids =
@@ -512,6 +665,99 @@ defmodule TerminalUiWeb.TerminalLive do
             select_pane(socket, first_id)
         end
     end
+  end
+
+  attr :form, :map, required: true
+  attr :error, :string, default: nil
+  attr :has_selected_pane, :boolean, required: true
+  attr :pane_count, :integer, required: true
+
+  def size_settings_modal(assigns) do
+    ~H"""
+    <div class="fixed inset-0 z-[60] flex items-center justify-center bg-black/60">
+      <form
+        phx-change="validate_size_settings"
+        phx-submit="apply_size_settings"
+        class="w-[22rem] rounded-lg border border-gray-700 bg-gray-900 p-5 shadow-xl"
+      >
+        <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-200">
+          Terminal size
+        </h2>
+        <div class="mb-3 grid grid-cols-2 gap-3">
+          <label class="flex flex-col text-xs text-gray-400">
+            Cols
+            <input
+              type="number"
+              name="cols"
+              value={@form["cols"]}
+              min="20"
+              max="500"
+              step="1"
+              class="mt-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-sm text-gray-100 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            />
+          </label>
+          <label class="flex flex-col text-xs text-gray-400">
+            Rows
+            <input
+              type="number"
+              name="rows"
+              value={@form["rows"]}
+              min="5"
+              max="200"
+              step="1"
+              class="mt-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-sm text-gray-100 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            />
+          </label>
+        </div>
+        <fieldset class="mb-4">
+          <legend class="mb-1 text-xs uppercase tracking-wide text-gray-500">
+            Apply to
+          </legend>
+          <label class="flex items-center gap-2 py-1 text-sm text-gray-200">
+            <input
+              type="radio"
+              name="scope"
+              value="current"
+              checked={@form["scope"] == "current"}
+              disabled={not @has_selected_pane}
+              class="accent-blue-500"
+            />
+            <span class={if @has_selected_pane, do: "", else: "text-gray-500"}>
+              Current pane
+            </span>
+          </label>
+          <label class="flex items-center gap-2 py-1 text-sm text-gray-200">
+            <input
+              type="radio"
+              name="scope"
+              value="all"
+              checked={@form["scope"] == "all"}
+              class="accent-blue-500"
+            />
+            <span>All panes ({@pane_count})</span>
+          </label>
+        </fieldset>
+        <%= if @error do %>
+          <p class="mb-3 text-xs text-red-400">{@error}</p>
+        <% end %>
+        <div class="flex justify-end gap-2">
+          <button
+            type="button"
+            phx-click="close_size_settings"
+            class="rounded border border-gray-700 px-3 py-1.5 text-sm text-gray-300 hover:bg-gray-800"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            class="rounded bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-500"
+          >
+            Apply
+          </button>
+        </div>
+      </form>
+    </div>
+    """
   end
 
   attr :selected_pane_id, :string, default: nil

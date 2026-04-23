@@ -34,6 +34,13 @@ defmodule TerminalUi.TerminalClient do
     Req.delete!(base_url() <> "/panes/#{id}", req_options())
   end
 
+  def resize_pane(id, cols, rows) do
+    Req.post(
+      base_url() <> "/panes/#{id}/resize",
+      Keyword.merge(req_options(), json: %{cols: cols, rows: rows})
+    )
+  end
+
   def get_screen(id) do
     case Req.get(base_url() <> "/panes/#{id}/screen", req_options()) do
       {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
